@@ -58,5 +58,5 @@ jobs:
             --retry 8 \
             --retry-delay 15 \
             --retry-connrefused \
-            --max-time 10 \
-            "${{ secrets.RAILWAY_APP_URL }}/api/health"
+            --max-time 30 \
+            "https://prompt-forge-production.up.railway.app/api/health"

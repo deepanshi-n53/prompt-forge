@@ -1,10 +1,19 @@
-import { createClient } from '@supabase/supabase-js'
+import { createClient, SupabaseClient } from '@supabase/supabase-js'
 
 // Service role client — server-side only, never expose to browser
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-)
+let supabaseInstance: SupabaseClient | null = null
+
+function getSupabaseClient(): SupabaseClient {
+  if (!supabaseInstance) {
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL
+    const key = process.env.SUPABASE_SERVICE_ROLE_KEY
+    if (!url || !key) {
+      throw new Error('Supabase credentials not configured')
+    }
+    supabaseInstance = createClient(url, key)
+  }
+  return supabaseInstance
+}
 
 // ── File security helpers ─────────────────────────────────────────────────────
 
@@ -81,7 +90,7 @@ export async function uploadBRD(
 ): Promise<string> {
   const path = generateStoragePath(projectId, brdId, version, fileName)
 
-  const { error } = await supabase.storage.from(BUCKET).upload(path, file, {
+  const { error } = await getSupabaseClient().storage.from(BUCKET).upload(path, file, {
     contentType: undefined, // let Supabase infer from file contents
     upsert: false,
   })
@@ -94,7 +103,7 @@ export async function uploadBRD(
 }
 
 export async function getBRDDownloadUrl(storagePath: string): Promise<string> {
-  const { data, error } = await supabase.storage
+  const { data, error } = await getSupabaseClient().storage
     .from(BUCKET)
     .createSignedUrl(storagePath, 3600)
 
@@ -106,7 +115,7 @@ export async function getBRDDownloadUrl(storagePath: string): Promise<string> {
 }
 
 export async function deleteBRD(storagePath: string): Promise<void> {
-  const { error } = await supabase.storage.from(BUCKET).remove([storagePath])
+  const { error } = await getSupabaseClient().storage.from(BUCKET).remove([storagePath])
 
   if (error) {
     throw new Error(`Failed to delete BRD from storage: ${error.message}`)

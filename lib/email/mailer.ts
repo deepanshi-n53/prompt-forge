@@ -1,14 +1,22 @@
 import nodemailer from 'nodemailer'
+import type { Transporter } from 'nodemailer'
 
-const transporter = nodemailer.createTransport({
-  host: process.env.EMAIL_HOST,
-  port: Number(process.env.EMAIL_PORT),
-  secure: false,
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
-  },
-})
+let transporterInstance: Transporter | null = null
+
+function getTransporter(): Transporter {
+  if (!transporterInstance) {
+    transporterInstance = nodemailer.createTransport({
+      host:   process.env.EMAIL_HOST,
+      port:   Number(process.env.EMAIL_PORT),
+      secure: false,
+      auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS,
+      },
+    })
+  }
+  return transporterInstance
+}
 
 export async function sendEmail({
   to,
@@ -25,7 +33,7 @@ export async function sendEmail({
   }
 
   try {
-    await transporter.sendMail({
+    await getTransporter().sendMail({
       from: process.env.EMAIL_FROM,
       to,
       subject,
