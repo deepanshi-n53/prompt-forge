@@ -47,16 +47,14 @@ jobs:
     environment: production
     steps:
       - name: Wait for Railway deployment
-        # Railway typically deploys in ~60–90 s after push is received.
-        # We wait 90 s to give it a reasonable head start.
-        run: sleep 90
+        run: sleep 180
 
       - name: Health check
         run: |
           curl \
             --fail \
-            --retry 8 \
-            --retry-delay 15 \
+            --retry 10 \
+            --retry-delay 20 \
             --retry-connrefused \
             --max-time 30 \
             "https://prompt-forge-production.up.railway.app/api/health"
