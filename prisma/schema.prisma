@@ -1,0 +1,221 @@
+datasource db {
+  provider = "postgresql"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// ─────────────────────────────────────────────
+// Enums
+// ─────────────────────────────────────────────
+
+enum Plan {
+  FREE
+  PROFESSIONAL
+  AGENCY
+  ENTERPRISE
+}
+
+enum ProjectStatus {
+  PROCESSING
+  PARSED
+  READY
+  ERROR
+  UPDATING
+}
+
+enum BRDStatus {
+  PENDING
+  PARSED
+  FAILED
+}
+
+enum Track {
+  FAST
+  FULL
+}
+
+enum PromptStatus {
+  GENERATED
+  OUTDATED
+  APPLIED
+}
+
+enum OrgRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+enum ChangeEventStatus {
+  PENDING
+  APPLIED
+  DISMISSED
+}
+
+// ─────────────────────────────────────────────
+// Models
+// ─────────────────────────────────────────────
+
+model User {
+  id               String        @id @default(cuid())
+  clerkId          String        @unique
+  email            String        @unique
+  name             String?
+  avatarUrl        String?
+  plan             Plan          @default(FREE)
+  isNewUser        Boolean       @default(false)
+  stripeCustomerId String?       @unique
+  deletedAt        DateTime?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  projects        Project[]
+  memberships     OrgMember[]
+  deletionRequest DeletionRequest?
+
+  @@index([clerkId])
+}
+
+model Organisation {
+  id               String    @id @default(cuid())
+  clerkOrgId       String    @unique
+  name             String
+  plan             Plan      @default(FREE)
+  stripeCustomerId String?
+  stripeSubId      String?
+  seats            Int       @default(1)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  members  OrgMember[]
+  projects Project[]
+}
+
+model OrgMember {
+  id       String   @id @default(cuid())
+  orgId    String
+  userId   String
+  role     OrgRole  @default(MEMBER)
+  joinedAt DateTime @default(now())
+
+  org  Organisation @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, userId])
+}
+
+model Project {
+  id          String        @id @default(cuid())
+  name        String
+  description String?
+  status      ProjectStatus @default(PROCESSING)
+  archetype           String?
+  archetypeConfidence Float?
+  track               Track         @default(FAST)
+  ownerId     String
+  orgId       String?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  owner        User           @relation(fields: [ownerId], references: [id])
+  org          Organisation?  @relation(fields: [orgId], references: [id])
+  brds         BRD[]
+  decisions    DecisionGraph?
+  prompts      GeneratedPrompt[]
+  figmaLinks   FigmaLink[]
+  changeEvents ChangeEvent[]
+
+  @@index([ownerId])
+  @@index([orgId])
+}
+
+model BRD {
+  id           String   @id @default(cuid())
+  projectId    String
+  version      Int      @default(1)
+  fileName     String
+  storagePath  String
+  fileSize     Int
+  mimeType     String
+  rawText      String?   @db.Text
+  status       BRDStatus @default(PENDING)
+  healthScore  Int?
+  healthDetail Json?
+  parsedContent Json?
+  isActive     Boolean   @default(true)
+  uploadedAt   DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([projectId, version])
+}
+
+model DecisionGraph {
+  id        String   @id @default(cuid())
+  projectId String   @unique
+  decisions Json
+  version   Int      @default(1)
+  updatedAt DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
+
+model GeneratedPrompt {
+  id          String       @id @default(cuid())
+  projectId   String
+  sectionNum  String
+  sectionName String
+  layer       String
+  track       Track
+  content     String       @db.Text
+  status      PromptStatus @default(GENERATED)
+  confidence  Float?
+  assumptions Json?
+  brdVersion  Int          @default(1)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, sectionNum, brdVersion])
+  @@index([projectId])
+}
+
+model FigmaLink {
+  id         String   @id @default(cuid())
+  projectId  String
+  figmaUrl   String
+  parsedData Json?
+  createdAt  DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
+
+model ChangeEvent {
+  id             String            @id @default(cuid())
+  projectId      String
+  oldBrdId       String
+  newBrdId       String
+  changeAnalysis Json
+  status         ChangeEventStatus @default(PENDING)
+  deltaPrompts   Json?
+  appliedAt      DateTime?
+  createdAt      DateTime          @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+}
+
+model DeletionRequest {
+  id           String    @id @default(cuid())
+  userId       String    @unique
+  requestedAt  DateTime  @default(now())
+  scheduledFor DateTime
+  completedAt  DateTime?
+
+  user User @relation(fields: [userId], references: [id])
+}
