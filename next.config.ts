@@ -7,7 +7,7 @@ const CSP = [
   "worker-src 'self' blob:",
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob: *.clerk.com *.supabase.co",
-  "connect-src 'self' *.anthropic.com *.inngest.com *.sentry.io *.posthog.com *.supabase.co *.clerk.com *.clerk.accounts.dev https://challenges.cloudflare.com",
+  "connect-src 'self' *.anthropic.com *.openai.com *.inngest.com *.sentry.io *.posthog.com *.supabase.co *.clerk.com *.clerk.accounts.dev https://challenges.cloudflare.com",
   "frame-src https://challenges.cloudflare.com *.clerk.com *.clerk.accounts.dev",
 ].join('; ')
 
