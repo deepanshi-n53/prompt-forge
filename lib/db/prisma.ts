@@ -1,12 +1,18 @@
 import { PrismaClient } from '@prisma/client'
 import { PrismaPg } from '@prisma/adapter-pg'
+import { Pool } from 'pg'
 
 declare global {
   var __prisma: PrismaClient | undefined
 }
 
 function makeClient(): PrismaClient {
-  const adapter = new PrismaPg(process.env.DATABASE_URL!)
+  // Supabase requires SSL. Pass an explicit Pool so we can set ssl options.
+  const pool = new Pool({
+    connectionString: process.env.DATABASE_URL!,
+    ssl: { rejectUnauthorized: false },
+  })
+  const adapter = new PrismaPg(pool)
   return new PrismaClient({
     adapter,
     log: process.env.NODE_ENV === 'development'

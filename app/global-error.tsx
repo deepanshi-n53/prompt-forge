@@ -8,23 +8,19 @@ export default function GlobalError({
   unstable_retry: () => void
 }) {
   return (
-    <html lang="en">
-      <body style={{ display: 'flex', minHeight: '100vh', alignItems: 'center', justifyContent: 'center', fontFamily: 'sans-serif' }}>
-        <div style={{ textAlign: 'center' }}>
-          <h2 style={{ marginBottom: '0.5rem' }}>Something went wrong</h2>
-          {error.digest && (
-            <p style={{ fontSize: '0.875rem', color: '#666', marginBottom: '1rem' }}>
-              Error ID: {error.digest}
-            </p>
-          )}
-          <button
-            onClick={unstable_retry}
-            style={{ padding: '0.5rem 1rem', cursor: 'pointer' }}
-          >
-            Try again
-          </button>
-        </div>
-      </body>
-    </html>
+    <div className="flex min-h-screen flex-col items-center justify-center px-4 text-center">
+      <div className="max-w-md space-y-4">
+        <h2 className="text-xl font-bold">Something went wrong</h2>
+        {error.digest && (
+          <p className="font-mono text-xs text-zinc-400">Ref: {error.digest}</p>
+        )}
+        <button
+          onClick={unstable_retry}
+          className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700 transition-colors"
+        >
+          Try again
+        </button>
+      </div>
+    </div>
   )
 }
