@@ -1,11 +1,14 @@
 import { PrismaClient } from '@prisma/client'
+import { PrismaPg } from '@prisma/adapter-pg'
 
 declare global {
   var __prisma: PrismaClient | undefined
 }
 
 function makeClient(): PrismaClient {
+  const adapter = new PrismaPg(process.env.DATABASE_URL!)
   return new PrismaClient({
+    adapter,
     log: process.env.NODE_ENV === 'development'
       ? [{ level: 'warn', emit: 'stdout' }, { level: 'error', emit: 'stdout' }]
       : [{ level: 'error', emit: 'stdout' }],
