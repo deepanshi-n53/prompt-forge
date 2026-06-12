@@ -3,10 +3,11 @@ import { withSentryConfig } from '@sentry/nextjs'
 
 const CSP = [
   "default-src 'self'",
-  "script-src 'self' 'unsafe-inline' 'unsafe-eval' *.clerk.com *.posthog.com",
+  "script-src 'self' 'unsafe-inline' 'unsafe-eval' *.clerk.com *.clerk.accounts.dev *.posthog.com",
   "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: blob: *.clerk.com",
-  "connect-src 'self' *.anthropic.com *.inngest.com *.sentry.io *.posthog.com *.supabase.co",
+  "img-src 'self' data: blob: *.clerk.com *.clerk.accounts.dev",
+  "connect-src 'self' *.clerk.com *.clerk.accounts.dev *.inngest.com *.sentry.io *.posthog.com *.supabase.co",
+  "frame-src 'self' *.clerk.com *.clerk.accounts.dev",
 ].join('; ')
 
 const nextConfig: NextConfig = {
@@ -30,15 +31,14 @@ export default withSentryConfig(nextConfig, {
   org:     process.env.SENTRY_ORG,
   project: process.env.SENTRY_PROJECT,
 
-  // Suppress Sentry CLI output in local builds
   silent: !process.env.CI,
 
-  // Upload larger source map chunks for better stack traces
   widenClientFileUpload: true,
 
-  // Tree-shake Sentry logger statements in production
-  disableLogger: true,
-
-  // Disable Vercel Cron monitoring (we use Inngest)
-  automaticVercelMonitors: false,
+  webpack: {
+    treeshake: {
+      removeDebugLogging: true,
+    },
+    automaticVercelMonitors: false,
+  },
 })
