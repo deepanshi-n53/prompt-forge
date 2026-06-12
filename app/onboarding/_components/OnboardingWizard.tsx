@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import { CheckCircle2, Upload, Zap, FileSearch } from 'lucide-react'
+import { Upload, Zap, FileSearch } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { BRDUploader } from '@/components/brd/BRDUploader'
 import type { Plan } from '@prisma/client'
@@ -76,7 +76,7 @@ function StepWelcome({ userName, onNext }: { userName: string; onNext: () => voi
         <h1 className="text-3xl font-extrabold text-zinc-900">
           Welcome to PromptForge, {userName}!
         </h1>
-        <p className="text-zinc-500">Here's what you'll be able to do:</p>
+        <p className="text-zinc-500">Here&apos;s what you&apos;ll be able to do:</p>
       </div>
 
       <ul className="space-y-3 text-left">
@@ -94,7 +94,7 @@ function StepWelcome({ userName, onNext }: { userName: string; onNext: () => voi
       </ul>
 
       <Button size="lg" className="w-full" onClick={onNext}>
-        Got it, let's go →
+        Got it, let&apos;s go →
       </Button>
     </div>
   )
@@ -209,7 +209,7 @@ function StepUploadBRD({
         </p>
         <h2 className="text-2xl font-bold text-zinc-900">Upload your BRD or describe your idea</h2>
         <p className="text-sm text-zinc-500">
-          Drop in a file — or just tell us what you're building in plain text.
+          Drop in a file — or just tell us what you&apos;re building in plain text.
         </p>
       </div>
 
@@ -226,7 +226,7 @@ function StepUploadBRD({
       {/* text idea input */}
       <div className="space-y-3">
         <label className="block text-sm font-medium text-zinc-700">
-          Just describe what you're building…
+          Just describe what you&apos;re building…
         </label>
         <textarea
           rows={5}
@@ -313,7 +313,7 @@ export function OnboardingWizard({ userName, plan }: OnboardingWizardProps) {
   }
 
   // ── Step 3: file upload complete ────────────────────────────────────────────
-  function handleFileProcessing(jobId: string, _brdId: string) {
+  function handleFileProcessing(jobId: string) {
     if (!projectId) return
     router.push(`/project/${projectId}/generating?jobId=${jobId}&onboarding=1`)
   }

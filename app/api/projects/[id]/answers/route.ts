@@ -52,11 +52,7 @@ export async function POST(request: NextRequest, { params }: Context) {
   const parsedBRD = (activeBrd?.parsedContent ?? {}) as unknown as ParsedBRD
 
   // Build the merged decision graph
-  const { sections, track } = buildDecisionGraph(
-    parsedBRD,
-    userAnswers,
-    project.decisions?.version ?? 0,
-  )
+  const { sections, track } = buildDecisionGraph(parsedBRD, userAnswers)
 
   // Upsert DecisionGraph
   const decisionGraph = await db.decisionGraph.upsert({

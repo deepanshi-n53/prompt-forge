@@ -1,5 +1,4 @@
 import { Suspense } from 'react'
-import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { Prisma, ProjectStatus } from '@prisma/client'
 import { db } from '@/lib/db/prisma'

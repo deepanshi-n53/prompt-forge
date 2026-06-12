@@ -52,7 +52,6 @@ function infraTier(q5: string): { tier: string; db_tier: string; cdn: boolean } 
 export function buildDecisionGraph(
   parsedBRD: ParsedBRD,
   userAnswers: UserAnswers,
-  existingVersion = 0,
 ): { sections: Record<string, SectionDecision>; track: 'FAST' | 'FULL' } {
   // User answers win; fill blanks with defaults
   const a: Required<UserAnswers> = {

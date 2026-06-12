@@ -35,7 +35,6 @@ function Dial({ score }: { score: number }) {
     requestAnimationFrame(tick)
   }, [score])
 
-  const offset = CIRCUMFERENCE * (1 - display / 100)
   const { stroke, text, label } = scoreColor(score)
 
   return (

@@ -7,7 +7,6 @@ import { setJobState } from '@/lib/jobs/redis'
 import { Prisma, ProjectStatus, Track, PromptStatus } from '@prisma/client'
 import type { ParsedBRD } from '@/types/brd'
 import type { DecisionGraph, SectionDecision } from '@/types/decision'
-import type { Assumption } from '@/types/decision'
 
 interface BRDAnsweredPayload {
   projectId:       string

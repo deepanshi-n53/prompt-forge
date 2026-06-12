@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { cn } from '@/lib/utils'
 import { useJobProgress } from '@/hooks/useJobProgress'
@@ -319,7 +319,7 @@ function UploadSection({
 
 type Mode = 'idle' | 'detecting' | 'applying'
 
-export function ChangeManagement({ projectId, projectName: _projectName, events }: Props) {
+export function ChangeManagement({ projectId, events }: Props) {
   const router  = useRouter()
   const [mode,    setMode]    = useState<Mode>('idle')
   const [applying, setApplying] = useState(false)
@@ -333,24 +333,30 @@ export function ChangeManagement({ projectId, projectName: _projectName, events 
   const trackJobId = mode === 'detecting' || applying ? projectId : null
   const progress   = useJobProgress(trackJobId)
 
-  // React to job completion
-  const prevStatusRef = useRef<string>('')
-  useEffect(() => {
-    if (progress.status === prevStatusRef.current) return
-    prevStatusRef.current = progress.status
-
+  // Adjust state during rendering when job status changes (avoids setState-in-effect)
+  const [prevProgressStatus, setPrevProgressStatus] = useState(progress.status)
+  if (prevProgressStatus !== progress.status) {
+    setPrevProgressStatus(progress.status)
     if (progress.status === 'complete') {
       setMode('idle')
       setApplying(false)
       setError(null)
-      router.refresh()
-    }
-    if (progress.status === 'failed') {
+    } else if (progress.status === 'failed') {
       setMode('idle')
       setApplying(false)
       setError(progress.error ?? 'An error occurred. Please try again.')
     }
-  }, [progress.status, progress.error, router])
+  }
+
+  // Side-effect only: refresh router data when job completes
+  const onComplete = useCallback(() => { router.refresh() }, [router])
+  const prevStatusForRefreshRef = useRef('')
+  useEffect(() => {
+    if (progress.status === 'complete' && prevStatusForRefreshRef.current !== 'complete') {
+      onComplete()
+    }
+    prevStatusForRefreshRef.current = progress.status
+  }, [progress.status, onComplete])
 
   async function handleApply(changeEventId: string) {
     setApplying(true)

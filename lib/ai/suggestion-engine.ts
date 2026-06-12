@@ -142,5 +142,5 @@ export function getSuggestionsForArchetype(
     (s) => matchesArchetype(s, archetype) && !added.has(s.id),
   )
     .slice(0, 5)
-    .map(({ archetypes: _a, ...rest }) => ({ ...rest, archetype }))
+    .map(({ archetypes: omit, ...rest }) => { void omit; return { ...rest, archetype } })
 }

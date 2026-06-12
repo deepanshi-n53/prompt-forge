@@ -59,7 +59,7 @@ function PageHero() {
           We built the tool we needed before every client project.
         </h1>
         <p className="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-zinc-500">
-          AI coding agents are powerful. But they're only as good as the context you give them.
+          AI coding agents are powerful. But they&apos;re only as good as the context you give them.
           PromptForge exists to make that context excellent — structured, confident, and complete
           — before you write a single line of code.
         </p>
@@ -86,7 +86,7 @@ function ProblemStory() {
             scaffolding was wrong, the rebuild cost more than starting from scratch.
           </p>
           <p>
-            The problem wasn't the AI. The problem was that nobody had given the AI a properly
+            The problem wasn&apos;t the AI. The problem was that nobody had given the AI a properly
             structured architecture context to work from.
           </p>
           <p>
@@ -113,7 +113,7 @@ function Solution() {
         <h2 className="text-2xl font-bold text-zinc-900">What PromptForge does differently</h2>
         <div className="prose prose-zinc max-w-none text-zinc-600 text-base leading-relaxed space-y-4">
           <p>
-            PromptForge doesn't generate architecture by asking the AI to free-form it from a BRD.
+            PromptForge doesn&apos;t generate architecture by asking the AI to free-form it from a BRD.
             It uses a structured system of{' '}
             <strong className="text-zinc-800">55 architecture sections</strong>, each representing
             one discrete decision a production SaaS must make: authentication model, database schema,
@@ -121,8 +121,8 @@ function Solution() {
           </p>
           <p>
             Each section has a prompt template — refined from real production architecture patterns
-            — and an explicit agent hint that tells Claude exactly what to output. The result isn't
-            a generic AI response. It's a structured, filled template with named fields, concrete
+            — and an explicit agent hint that tells Claude exactly what to output. The result isn&apos;t
+            a generic AI response. It&apos;s a structured, filled template with named fields, concrete
             values, and cross-references to other sections.
           </p>
           <p>
@@ -137,7 +137,7 @@ function Solution() {
             Upload a revised BRD and PromptForge runs a diff against the current architecture.
             Sections are classified as BREAKING (must re-generate), REVIEW (may have changed), or
             SAFE (unaffected). Only the affected sections are re-generated — saving time and
-            preserving the decisions you've already validated.
+            preserving the decisions you&apos;ve already validated.
           </p>
         </div>
       </div>

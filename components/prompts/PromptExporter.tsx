@@ -204,7 +204,6 @@ export interface PromptExporterProps {
   sectionName:    string
   content:        string
   allSections:    FullPrompt[]
-  loadedCount:    number
   onFetchAll:     () => Promise<FullPrompt[]>
   track:          string
 }
@@ -220,7 +219,6 @@ export function PromptExporter({
   sectionName,
   content,
   allSections,
-  loadedCount,
   onFetchAll,
   track,
 }: PromptExporterProps) {

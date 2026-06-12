@@ -9,22 +9,19 @@ interface AppShellProps {
   children: React.ReactNode
 }
 
+// Outer wrapper: reads pathname and uses it as a React key so that AppShellInner
+// is fully remounted on navigation, automatically resetting the sidebar open state.
 export function AppShell({ sidebar, children }: AppShellProps) {
-  const [open, setOpen] = useState(false)
   const pathname = usePathname()
+  return <AppShellInner key={pathname} sidebar={sidebar}>{children}</AppShellInner>
+}
 
-  // Close sidebar whenever the route changes (link was tapped on mobile)
-  useEffect(() => {
-    setOpen(false)
-  }, [pathname])
+function AppShellInner({ sidebar, children }: AppShellProps) {
+  const [open, setOpen] = useState(false)
 
   // Prevent body scroll when mobile sidebar is open
   useEffect(() => {
-    if (open) {
-      document.body.style.overflow = 'hidden'
-    } else {
-      document.body.style.overflow = ''
-    }
+    document.body.style.overflow = open ? 'hidden' : ''
     return () => { document.body.style.overflow = '' }
   }, [open])
 

@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 
 const STORAGE_KEY = 'pf-cookie-consent'
 
@@ -14,13 +14,11 @@ function isEuTimezone(): boolean {
 }
 
 export function CookieConsent() {
-  const [visible, setVisible] = useState(false)
-
-  useEffect(() => {
-    if (!isEuTimezone()) return
-    const saved = localStorage.getItem(STORAGE_KEY)
-    if (!saved) setVisible(true)
-  }, [])
+  const [visible, setVisible] = useState(() => {
+    if (typeof window === 'undefined') return false
+    if (!isEuTimezone()) return false
+    return !localStorage.getItem(STORAGE_KEY)
+  })
 
   function accept() {
     localStorage.setItem(STORAGE_KEY, 'all')

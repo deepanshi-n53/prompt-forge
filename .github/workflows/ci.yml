@@ -28,13 +28,24 @@ jobs:
       - name: Generate Prisma client
         run: npx prisma generate
         env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DATABASE_URL: postgresql://fake:fake@localhost:5432/fake
 
       - name: Lint
         run: npm run lint
+        env:
+          DATABASE_URL: postgresql://fake:fake@localhost:5432/fake
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: pk_test_fake
+          CLERK_SECRET_KEY: sk_test_fake
+          NEXT_PUBLIC_SUPABASE_URL: https://fake.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: eyJfake
+          ANTHROPIC_API_KEY: sk-ant-fake
+          STRIPE_SECRET_KEY: sk_test_fake
+          NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: pk_test_fake
 
       - name: Type check
         run: npm run type-check
+        env:
+          DATABASE_URL: postgresql://fake:fake@localhost:5432/fake
 
   test:
     name: Unit tests
@@ -53,7 +64,7 @@ jobs:
       - name: Generate Prisma client
         run: npx prisma generate
         env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DATABASE_URL: postgresql://fake:fake@localhost:5432/fake
 
       - name: Run tests
         run: npm test

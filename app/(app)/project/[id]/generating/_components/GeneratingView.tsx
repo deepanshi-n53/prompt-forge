@@ -154,7 +154,6 @@ export function GeneratingView({ projectId, jobId, isOnboarding = false }: Gener
     }
     if (progress.status === 'complete' || progress.status === 'failed') {
       if (slowTimer.current) clearTimeout(slowTimer.current)
-      setSlow(false)
     }
     return () => { if (slowTimer.current) clearTimeout(slowTimer.current) }
   }, [progress.status, slow])

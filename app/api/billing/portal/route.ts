@@ -1,9 +1,9 @@
-import { type NextRequest, NextResponse } from 'next/server'
+import { NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/auth'
 import { createPortalSession } from '@/lib/stripe/stripe'
 
 // POST /api/billing/portal — create a Stripe billing portal session
-export async function POST(_request: NextRequest) {
+export async function POST() {
   let user: Awaited<ReturnType<typeof requireAuth>>
   try {
     user = await requireAuth()

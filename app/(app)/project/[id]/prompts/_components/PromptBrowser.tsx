@@ -355,7 +355,6 @@ export function PromptBrowser({
           sectionName={activePrompt.sectionName}
           content={activePrompt.content}
           allSections={Object.values(loadedPrompts)}
-          loadedCount={Object.keys(loadedPrompts).length}
           onFetchAll={fetchAllSections}
           track={track}
         />

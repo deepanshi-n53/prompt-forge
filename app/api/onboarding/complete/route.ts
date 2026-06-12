@@ -1,8 +1,8 @@
-import { type NextRequest, NextResponse } from 'next/server'
+import { NextResponse } from 'next/server'
 import { db } from '@/lib/db/prisma'
 import { requireAuth } from '@/lib/auth'
 
-export async function POST(_request: NextRequest) {
+export async function POST() {
   let user: Awaited<ReturnType<typeof requireAuth>>
   try {
     user = await requireAuth()
