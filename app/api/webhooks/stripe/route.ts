@@ -1,6 +1,6 @@
 import { type NextRequest, NextResponse } from 'next/server'
 import Stripe from 'stripe'
-import { stripe, PLAN_MAP } from '@/lib/stripe/stripe'
+import { getStripe, PLAN_MAP } from '@/lib/stripe/stripe'
 import { db } from '@/lib/db/prisma'
 import { sendEmail } from '@/lib/email/mailer'
 import { sendPaymentFailedEmail } from '@/lib/email'
@@ -15,7 +15,7 @@ export async function POST(request: NextRequest) {
 
   let event: Stripe.Event
   try {
-    event = stripe.webhooks.constructEvent(rawBody, sig, secret)
+    event = getStripe().webhooks.constructEvent(rawBody, sig, secret)
   } catch (err) {
     console.error('[stripe/webhook] signature verification failed', err)
     return NextResponse.json({ error: 'Invalid signature' }, { status: 400 })
@@ -67,7 +67,7 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
     return
   }
 
-  const subscription = await stripe.subscriptions.retrieve(subscriptionId)
+  const subscription = await getStripe().subscriptions.retrieve(subscriptionId)
   const priceId      = subscription.items.data[0]?.price.id
   const plan         = (priceId && PLAN_MAP[priceId]) ? PLAN_MAP[priceId] : Plan.PROFESSIONAL
 

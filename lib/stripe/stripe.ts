@@ -1,10 +1,14 @@
 import Stripe from 'stripe'
 import { Plan } from '@prisma/client'
 
-export const stripe = new Stripe(process.env.STRIPE_SECRET_KEY ?? '', {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  apiVersion: '2025-01-27.acacia' as any,
-})
+let _client: Stripe | undefined
+
+export function getStripe(): Stripe {
+  return (_client ??= new Stripe(process.env.STRIPE_SECRET_KEY!, {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    apiVersion: '2025-01-27.acacia' as any,
+  }))
+}
 
 // Map plan → Stripe price ID (set in env)
 export const PRICE_IDS: Record<Exclude<Plan, 'FREE'>, string> = {
@@ -29,7 +33,7 @@ export const PLAN_PRICES: Record<Exclude<Plan, 'FREE'>, number> = {
 
 /** Create a Stripe customer and return the customer ID. DB save is the caller's responsibility. */
 export async function createCustomer(email: string, name: string): Promise<string> {
-  const customer = await stripe.customers.create({ email, name: name || email })
+  const customer = await getStripe().customers.create({ email, name: name || email })
   return customer.id
 }
 
@@ -42,7 +46,7 @@ export async function createCheckoutSession(
   priceId:    string,
   userId:     string,
 ): Promise<string> {
-  const session = await stripe.checkout.sessions.create({
+  const session = await getStripe().checkout.sessions.create({
     customer:              customerId,
     mode:                  'subscription',
     line_items:            [{ price: priceId, quantity: 1 }],
@@ -57,7 +61,7 @@ export async function createCheckoutSession(
 
 /** Create a Stripe billing-portal session. Returns the portal URL. */
 export async function createPortalSession(customerId: string): Promise<string> {
-  const session = await stripe.billingPortal.sessions.create({
+  const session = await getStripe().billingPortal.sessions.create({
     customer:   customerId,
     return_url: `${process.env.NEXT_PUBLIC_APP_URL}/account/billing`,
   })

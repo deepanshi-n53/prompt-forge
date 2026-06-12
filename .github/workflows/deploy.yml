@@ -24,16 +24,18 @@ jobs:
         run: npx prisma generate
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DIRECT_URL: ${{ secrets.DIRECT_URL }}
 
       - name: Run migrations
         run: |
-          if [ -z "$DATABASE_URL" ]; then
-            echo "::notice::DATABASE_URL secret not set — skipping migration"
+          if [ -z "$DIRECT_URL" ]; then
+            echo "::notice::DIRECT_URL secret not set — skipping migration"
             exit 0
           fi
           npx prisma migrate deploy
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DIRECT_URL: ${{ secrets.DIRECT_URL }}
 
   # Railway auto-deploys when it detects a push to main.
   # This job waits for Railway to finish, then verifies the deployment.

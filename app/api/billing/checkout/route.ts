@@ -3,7 +3,7 @@ import { z } from 'zod'
 import { db } from '@/lib/db/prisma'
 import { requireAuth } from '@/lib/auth'
 import {
-  stripe,
+  getStripe,
   createCustomer,
   createCheckoutSession,
   PRICE_IDS,
@@ -70,7 +70,7 @@ export async function POST(request: NextRequest) {
       select: { email: true, name: true },
     })
     if (fullUser) {
-      await stripe.customers.update(customerId, {
+      await getStripe().customers.update(customerId, {
         email: fullUser.email,
         name:  fullUser.name ?? fullUser.email,
       })
