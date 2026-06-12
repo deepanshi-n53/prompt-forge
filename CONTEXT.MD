@@ -13,7 +13,7 @@ TECH STACK:
 - Database: PostgreSQL via Supabase
 - File Storage: Supabase Storage (private bucket 'brds', signed URLs for download)
 - Cache / Rate Limit: Upstash Redis (REST API, free tier)
-- AI: Anthropic Claude claude-sonnet-4-6
+- AI: OpenAI GPT-4o (production) / Ollama llama3.1:8b (local development) / Anthropic claude-sonnet-4-6 (optional fallback)
 - Background Jobs: Inngest (serverless-native, free tier)
 - Auth: Clerk (JWT, social login, org support)
 - Payments: Stripe (subscriptions)

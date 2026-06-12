@@ -1,7 +1,5 @@
-import Anthropic from '@anthropic-ai/sdk'
+import { callAI } from './ai-client'
 import type { DecisionGraph, ChangeAnalysis, SectionImpact } from '@/types/decision'
-
-const client = new Anthropic()
 
 const SYSTEM = `You are a software architect analysing BRD (Business Requirements Document) changes.
 Compare OLD and NEW BRD semantically — not just text diff.
@@ -76,20 +74,18 @@ export async function detectChanges(
     `## DECISION GRAPH\n${JSON.stringify(decisions.sections ?? {}, null, 2).slice(0, 4_000)}`,
   ].join('\n\n---\n\n')
 
-  const response = await client.messages.create({
-    model:      'claude-sonnet-4-6',
-    max_tokens: 3_000,
-    system:     SYSTEM,
-    messages:   [{ role: 'user', content: userMessage }],
-  })
-
-  const block = response.content[0]
-  if (block.type !== 'text') throw new Error(`Unexpected response type: ${block.type}`)
+  const response = await callAI(
+    [
+      { role: 'system', content: SYSTEM },
+      { role: 'user',   content: userMessage },
+    ],
+    3000,
+  )
 
   try {
-    return parseResponse(block.text)
+    return parseResponse(response.text)
   } catch {
-    // Claude response could not be parsed — conservative fallback
+    // AI response could not be parsed — conservative fallback
     return {
       summary:
         'Unable to analyse changes automatically. Please review the updated BRD manually.',

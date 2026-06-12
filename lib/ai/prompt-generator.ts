@@ -1,9 +1,7 @@
-import Anthropic from '@anthropic-ai/sdk'
+import { callAI } from './ai-client'
 import { SECTION_TEMPLATES } from './section-templates'
 import type { ParsedBRD } from '@/types/brd'
 import type { DecisionGraph, Assumption } from '@/types/decision'
-
-const client = new Anthropic()
 
 function buildSystem(agentHint: string): string {
   return `You are a senior software architect filling in a SaaS architecture prompt section.
@@ -75,28 +73,26 @@ export async function generateSection(
     `## SECTION PROMPT (§${sectionNum} — ${template.name})\n${template.prompt}`,
   ].join('\n\n')
 
-  const response = await client.messages.create({
-    model:      'claude-sonnet-4-6',
-    max_tokens: 4000,
-    system:     buildSystem(template.agentHint),
-    messages:   [{ role: 'user', content: userMessage }],
-  })
+  const systemPrompt = buildSystem(template.agentHint)
 
-  const block = response.content[0]
-  if (block.type !== 'text') {
-    throw new Error(`Unexpected Claude response block type: ${block.type}`)
-  }
+  const response = await callAI(
+    [
+      { role: 'system', content: systemPrompt },
+      { role: 'user',   content: userMessage },
+    ],
+    4000,
+  )
 
   try {
-    return safeParse(block.text)
+    return safeParse(response.text)
   } catch {
     return {
-      content:    block.text,
+      content:    response.text,
       confidence: 0.4,
       assumptions: [{
         field:      'parse_error',
         value:      'raw-text',
-        reason:     'Claude response was not valid JSON — content preserved verbatim',
+        reason:     'AI response was not valid JSON — content preserved verbatim',
         confidence: 'LOW',
       }],
     }

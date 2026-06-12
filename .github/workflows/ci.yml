@@ -38,7 +38,8 @@ jobs:
           CLERK_SECRET_KEY: sk_test_fake
           NEXT_PUBLIC_SUPABASE_URL: https://fake.supabase.co
           NEXT_PUBLIC_SUPABASE_ANON_KEY: eyJfake
-          ANTHROPIC_API_KEY: sk-ant-fake
+          OPENAI_API_KEY: sk-fake-key-for-ci
+          AI_PROVIDER: ollama
           STRIPE_SECRET_KEY: sk_test_fake
           NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: pk_test_fake
 
@@ -99,7 +100,8 @@ jobs:
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
           INNGEST_EVENT_KEY: ${{ secrets.INNGEST_EVENT_KEY }}
           INNGEST_SIGNING_KEY: ${{ secrets.INNGEST_SIGNING_KEY }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          AI_PROVIDER: openai
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
           NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY }}
           STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
