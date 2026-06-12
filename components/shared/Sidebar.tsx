@@ -17,7 +17,12 @@ const PLAN_BADGE: Record<Plan, { label: string; classes: string }> = {
 }
 
 export async function Sidebar() {
-  const user = await getCurrentUser()
+  let user: Awaited<ReturnType<typeof getCurrentUser>> = null
+  try {
+    user = await getCurrentUser()
+  } catch {
+    // DB unavailable — render with defaults
+  }
   const plan = user?.plan ?? 'FREE'
   const badge = PLAN_BADGE[plan]
 

@@ -4,10 +4,11 @@ import { withSentryConfig } from '@sentry/nextjs'
 const CSP = [
   "default-src 'self'",
   "script-src 'self' 'unsafe-inline' 'unsafe-eval' *.clerk.com *.clerk.accounts.dev https://challenges.cloudflare.com *.posthog.com",
+  "worker-src 'self' blob:",
   "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: blob: *.clerk.com *.clerk.accounts.dev",
-  "connect-src 'self' *.clerk.com *.clerk.accounts.dev https://challenges.cloudflare.com *.inngest.com *.sentry.io *.posthog.com *.supabase.co",
-  "frame-src 'self' *.clerk.com *.clerk.accounts.dev https://challenges.cloudflare.com",
+  "img-src 'self' data: blob: *.clerk.com *.supabase.co",
+  "connect-src 'self' *.anthropic.com *.inngest.com *.sentry.io *.posthog.com *.supabase.co *.clerk.com *.clerk.accounts.dev https://challenges.cloudflare.com",
+  "frame-src https://challenges.cloudflare.com *.clerk.com *.clerk.accounts.dev",
 ].join('; ')
 
 const nextConfig: NextConfig = {

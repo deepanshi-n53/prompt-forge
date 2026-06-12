@@ -34,7 +34,7 @@ jobs:
           fi
           npx prisma migrate deploy
         env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DATABASE_URL: ${{ secrets.DIRECT_URL }}
           DIRECT_URL: ${{ secrets.DIRECT_URL }}
 
   # Railway auto-deploys when it detects a push to main.
