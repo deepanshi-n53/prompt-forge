@@ -1,7 +1,7 @@
 import { inngest } from '@/inngest/client'
 import { db } from '@/lib/db/prisma'
 import { deleteBRD } from '@/lib/storage/supabase-storage'
-import { stripe } from '@/lib/stripe/stripe'
+import { getStripe } from '@/lib/stripe/stripe'
 import { clerkClient } from '@clerk/nextjs/server'
 
 interface DeletionPayload {
@@ -42,10 +42,10 @@ export const gdprDeletionJob = inngest.createFunction(
         .catch(() => null)
 
       if (customerId) {
-        const subscriptions = await stripe.subscriptions.list({ customer: customerId, limit: 10 })
+        const subscriptions = await getStripe().subscriptions.list({ customer: customerId, limit: 10 })
         await Promise.allSettled(
           subscriptions.data.map((sub) =>
-            stripe.subscriptions.cancel(sub.id, { prorate: false }),
+            getStripe().subscriptions.cancel(sub.id, { prorate: false }),
           ),
         )
       }

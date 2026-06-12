@@ -27,6 +27,7 @@ jobs:
           DIRECT_URL: ${{ secrets.DIRECT_URL }}
 
       - name: Run migrations
+        continue-on-error: true
         run: |
           if [ -z "$DIRECT_URL" ]; then
             echo "::notice::DIRECT_URL secret not set — skipping migration"
