@@ -1,12 +1,10 @@
 import Stripe from 'stripe'
 import { Plan } from '@prisma/client'
 
-let _client: Stripe | undefined
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || 'placeholder', { apiVersion: '2024-06-20' as any })
 
-export function getStripe(): Stripe {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return (_client ??= new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2025-01-27.acacia' as any }))
-}
+export function getStripe(): Stripe { return stripe }
 
 // Map plan → Stripe price ID (set in env)
 export const PRICE_IDS: Record<Exclude<Plan, 'FREE'>, string> = {
