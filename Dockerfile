@@ -23,6 +23,7 @@ COPY . .
 
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV NODE_ENV=production
+ENV HOSTNAME="0.0.0.0"
 
 RUN npm run build
 
