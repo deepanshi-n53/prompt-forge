@@ -67,6 +67,6 @@ export async function GET() {
       timestamp: new Date().toISOString(),
       version:   VERSION,
     },
-    { status: httpStatus },
+    { status: 200 },
   )
 }
