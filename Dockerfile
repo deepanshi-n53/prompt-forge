@@ -34,8 +34,7 @@ RUN apt-get update && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
 
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
-ENV PORT=3000
-ENV HOSTNAME="0.0.0.0"
+
 
 # Copy everything as root so permissions are correct
 COPY --from=builder /app/public ./public
@@ -45,6 +44,6 @@ COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./package.json
 
-EXPOSE 3000
+EXPOSE 8080
 
 CMD ["sh", "-c", "npx prisma migrate deploy && node server.js"]
