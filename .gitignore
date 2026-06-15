@@ -44,6 +44,3 @@ next-env.d.ts
 
 # railway
 .railway/
-
-# prisma migration sql (generated, not source)
-/prisma/migrations/**/*.sql

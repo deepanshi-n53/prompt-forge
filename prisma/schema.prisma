@@ -67,7 +67,8 @@ model User {
   name             String?
   avatarUrl        String?
   plan             Plan          @default(FREE)
-  isNewUser        Boolean       @default(false)
+  isNewUser        Boolean       @default(true)
+  isInternalUser   Boolean       @default(false)
   stripeCustomerId String?       @unique
   deletedAt        DateTime?
   createdAt        DateTime      @default(now())
