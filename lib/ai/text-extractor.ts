@@ -1,4 +1,5 @@
-import { getBRDDownloadUrl } from '@/lib/storage/supabase-storage'
+import mammoth from 'mammoth'
+import { getSupabaseClient } from '@/lib/storage/supabase-storage'
 
 const MAX_CHARS = 500_000
 
@@ -12,24 +13,37 @@ function cleanText(raw: string): string {
     .slice(0, MAX_CHARS)
 }
 
-// pdf-parse v2 uses a class-based API. Disable canvas/image flags that require
-// browser globals (DOMMatrix, OffscreenCanvas) which are absent in some Node.js
-// environments and all edge runtimes.
 async function extractPdfText(buffer: Buffer): Promise<string> {
   try {
-    const { PDFParse } = await import('pdf-parse')
-    const parser = new PDFParse({
+    const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs')
+    pdfjsLib.GlobalWorkerOptions.workerSrc = ''
+
+    const loadingTask = pdfjsLib.getDocument({
       data: new Uint8Array(buffer),
+      useWorkerFetch: false,
+      useSystemFonts: true,
       isOffscreenCanvasSupported: false,
-      isImageDecoderSupported: false,
       disableFontFace: true,
     })
-    const result = await parser.getText({ pageJoiner: '\n\n' })
-    await parser.destroy()
-    return result.text
+
+    const pdf = await loadingTask.promise
+    const numPages = pdf.numPages
+    const textPages: string[] = []
+
+    for (let i = 1; i <= numPages; i++) {
+      const page = await pdf.getPage(i)
+      const textContent = await page.getTextContent()
+      const pageText = textContent.items
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        .map((item: any) => ('str' in item ? (item.str as string) : ''))
+        .join(' ')
+      textPages.push(pageText)
+    }
+
+    return textPages.join('\n')
   } catch (error) {
     console.error('PDF extraction error:', error)
-    return 'PDF content could not be extracted. Please try a .txt or .docx file instead.'
+    return 'PDF content could not be extracted. Please upload a .txt or .docx file instead.'
   }
 }
 
@@ -37,14 +51,15 @@ export async function extractTextFromStorage(
   storagePath: string,
   mimeType: string,
 ): Promise<string> {
-  const signedUrl = await getBRDDownloadUrl(storagePath)
+  const supabase = getSupabaseClient()
 
-  const response = await fetch(signedUrl)
-  if (!response.ok) {
-    throw new Error(`Failed to fetch BRD from storage: ${response.statusText}`)
+  const { data, error } = await supabase.storage.from('brds').download(storagePath)
+
+  if (error || !data) {
+    throw new Error(`Failed to download BRD: ${error?.message}`)
   }
 
-  const arrayBuffer = await response.arrayBuffer()
+  const arrayBuffer = await data.arrayBuffer()
   const buffer = Buffer.from(arrayBuffer)
 
   if (mimeType === 'application/pdf') {
@@ -52,10 +67,6 @@ export async function extractTextFromStorage(
   }
 
   if (mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const mammoth = require('mammoth') as {
-      extractRawText: (input: { buffer: Buffer }) => Promise<{ value: string }>
-    }
     const result = await mammoth.extractRawText({ buffer })
     return cleanText(result.value)
   }
