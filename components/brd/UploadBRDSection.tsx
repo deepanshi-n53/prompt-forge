@@ -15,7 +15,14 @@ export function UploadBRDSection({ projectId, hasActiveBrd }: Props) {
   const [open, setOpen] = useState(false)
 
   function handleProcessing() {
-    router.refresh()
+    if (hasActiveBrd) {
+      // Re-upload: reload page so the new active BRD is reflected
+      router.refresh()
+    } else {
+      // First upload: go to the wizard so the user can answer questions
+      // while the BRD is parsed in the background
+      router.push(`/project/${projectId}/setup`)
+    }
   }
 
   if (hasActiveBrd) {

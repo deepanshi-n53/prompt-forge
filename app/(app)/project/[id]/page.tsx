@@ -118,7 +118,12 @@ export default async function ProjectPage({
           {activeBrd && (
             <UploadBRDSection projectId={project.id} hasActiveBrd={true} />
           )}
-          {(project.status === 'READY' || project.status === 'PARSED') && (
+          {project.status === 'PARSED' && (
+            <Link href={`/project/${project.id}/setup`} className={cn(buttonVariants())}>
+              Configure &amp; Generate →
+            </Link>
+          )}
+          {project.status === 'READY' && (
             <Link href={`/project/${project.id}/prompts`} className={cn(buttonVariants())}>
               Review Architecture →
             </Link>

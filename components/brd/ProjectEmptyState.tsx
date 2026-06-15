@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { BRDUploader } from './BRDUploader'
 
@@ -68,8 +68,18 @@ export function ProjectEmptyState({ projectId, projectStatus }: ProjectEmptyStat
 
   const isProcessing = projectStatus === 'PROCESSING'
 
-  function onProcessing(jobId: string) {
-    router.push(`/project/${projectId}/generating?jobId=${jobId}`)
+  // While the BRD is being parsed, poll until the project status changes.
+  // On each refresh the server re-renders with the latest DB state; once
+  // healthDetail is populated the parent won't render this component at all.
+  useEffect(() => {
+    if (!isProcessing) return
+    const t = setInterval(() => router.refresh(), 3_000)
+    return () => clearInterval(t)
+  }, [isProcessing, router])
+
+  function onProcessing() {
+    // After uploading a BRD from this component, go straight to the wizard
+    router.push(`/project/${projectId}/setup`)
   }
 
   return (
