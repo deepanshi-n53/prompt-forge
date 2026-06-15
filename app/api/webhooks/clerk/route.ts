@@ -63,10 +63,13 @@ export async function POST(request: NextRequest) {
         const data = evt.data as DeletedObjectJSON
         if (!data.id) break
 
-        await db.user.update({
-          where: { clerkId: data.id },
-          data: { deletedAt: new Date() },
-        })
+        const existingUser = await db.user.findUnique({ where: { clerkId: data.id } })
+        if (existingUser) {
+          await db.user.update({
+            where: { clerkId: data.id },
+            data: { deletedAt: new Date() },
+          })
+        }
         break
       }
 

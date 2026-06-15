@@ -93,7 +93,7 @@ export async function POST(request: NextRequest) {
 
   let storagePath: string
   try {
-    storagePath = await uploadBRD(buffer, fileField.name, projectId, brd.id, version)
+    storagePath = await uploadBRD(buffer, fileField.name, projectId, brd.id, version, fileField.type)
   } catch (err) {
     await db.bRD.delete({ where: { id: brd.id } })
     console.error('[brd/upload] storage upload failed', err)

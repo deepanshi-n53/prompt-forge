@@ -87,19 +87,23 @@ export async function uploadBRD(
   projectId: string,
   brdId: string,
   version: number,
+  mimeType: string,
 ): Promise<string> {
-  const path = generateStoragePath(projectId, brdId, version, fileName)
+  const storagePath = generateStoragePath(projectId, brdId, version, fileName)
 
-  const { error } = await getSupabaseClient().storage.from(BUCKET).upload(path, file, {
-    contentType: undefined, // let Supabase infer from file contents
-    upsert: false,
-  })
+  const { error } = await getSupabaseClient()
+    .storage
+    .from('brds')
+    .upload(storagePath, file, {
+      contentType: mimeType,
+      upsert: false,
+    })
 
   if (error) {
     throw new Error(`Failed to upload BRD to storage: ${error.message}`)
   }
 
-  return path
+  return storagePath
 }
 
 export async function getBRDDownloadUrl(storagePath: string): Promise<string> {
