@@ -14,7 +14,7 @@ interface ApplyRequestedPayload {
 
 const BATCH_SIZE = 3
 
-export const generateDeltaPromptsJob = inngest.createFunction(
+export const generateDeltaJob = inngest.createFunction(
   {
     id:       'generate-delta-prompts',
     retries:  3,

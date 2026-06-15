@@ -1,6 +1,7 @@
 import { notFound } from 'next/navigation'
 import Link from 'next/link'
 import { ProjectEmptyState } from '@/components/brd/ProjectEmptyState'
+import { UploadBRDSection } from '@/components/brd/UploadBRDSection'
 import { db } from '@/lib/db/prisma'
 import { requireAuth } from '@/lib/auth'
 import { HealthScore } from '@/components/brd/HealthScore'
@@ -113,11 +114,16 @@ export default async function ProjectPage({
           )}
         </div>
 
-        {project.status === 'READY' || project.status === 'PARSED' ? (
-          <Link href={`/project/${project.id}/prompts`} className={cn(buttonVariants())}>
-            Review Architecture →
-          </Link>
-        ) : null}
+        <div className="flex items-center gap-3">
+          {activeBrd && (
+            <UploadBRDSection projectId={project.id} hasActiveBrd={true} />
+          )}
+          {(project.status === 'READY' || project.status === 'PARSED') && (
+            <Link href={`/project/${project.id}/prompts`} className={cn(buttonVariants())}>
+              Review Architecture →
+            </Link>
+          )}
+        </div>
       </div>
 
       {/* tabs */}
@@ -133,65 +139,69 @@ export default async function ProjectPage({
 
         {/* ── overview tab ── */}
         <TabsContent value="overview" className="mt-6">
-          <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-            {/* health score */}
-            <div className="lg:col-span-1">
-              {healthReport ? (
-                <div className="rounded-xl border border-zinc-200 bg-white p-6">
-                  <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-zinc-500">
-                    BRD Health
-                  </h2>
-                  <HealthScore report={healthReport} />
-                </div>
-              ) : (
-                <div className="rounded-xl border border-dashed border-zinc-200 bg-zinc-50 p-6 text-center">
-                  <p className="text-sm text-zinc-500">
-                    {project.status === 'PROCESSING'
-                      ? 'Analysing your BRD…'
-                      : 'Upload a BRD to see the health score'}
-                  </p>
-                </div>
-              )}
+          {!activeBrd ? (
+            <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-8">
+              <UploadBRDSection projectId={project.id} hasActiveBrd={false} />
             </div>
-
-            {/* assumptions + suggestions */}
-            <div className="space-y-6 lg:col-span-2">
-              {/* assumption cards */}
-              {assumptions.length > 0 && (
-                <div>
-                  <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-zinc-500">
-                    Key Decisions Inferred
-                  </h2>
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                    {assumptions.map((a) => (
-                      <AssumptionCard key={a.field} {...a} />
-                    ))}
+          ) : (
+            <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+              {/* health score */}
+              <div className="lg:col-span-1">
+                {healthReport ? (
+                  <div className="rounded-xl border border-zinc-200 bg-white p-6">
+                    <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-zinc-500">
+                      BRD Health
+                    </h2>
+                    <HealthScore report={healthReport} />
                   </div>
-                </div>
-              )}
+                ) : (
+                  <div className="rounded-xl border border-dashed border-zinc-200 bg-zinc-50 p-6 text-center">
+                    <p className="text-sm text-zinc-500">
+                      {project.status === 'PROCESSING'
+                        ? 'Analysing your BRD…'
+                        : 'Upload a BRD to see the health score'}
+                    </p>
+                  </div>
+                )}
+              </div>
 
-              {/* suggestions */}
-              {healthReport && healthReport.recommendations.length > 0 && (
-                <div>
-                  <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-zinc-500">
-                    Suggestions to Strengthen your BRD
-                  </h2>
-                  <ul className="space-y-2">
-                    {healthReport.recommendations.slice(0, 5).map((rec, i) => (
-                      <li key={i} className="flex gap-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
-                        <span>💡</span>
-                        <span>{rec}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
+              {/* assumptions + suggestions */}
+              <div className="space-y-6 lg:col-span-2">
+                {assumptions.length > 0 && (
+                  <div>
+                    <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-zinc-500">
+                      Key Decisions Inferred
+                    </h2>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      {assumptions.map((a) => (
+                        <AssumptionCard key={a.field} {...a} />
+                      ))}
+                    </div>
+                  </div>
+                )}
 
-              {!healthReport && !assumptions.length && (
-                <ProjectEmptyState projectId={project.id} projectStatus={project.status} />
-              )}
+                {healthReport && healthReport.recommendations.length > 0 && (
+                  <div>
+                    <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-zinc-500">
+                      Suggestions to Strengthen your BRD
+                    </h2>
+                    <ul className="space-y-2">
+                      {healthReport.recommendations.slice(0, 5).map((rec, i) => (
+                        <li key={i} className="flex gap-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                          <span>💡</span>
+                          <span>{rec}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {!healthReport && !assumptions.length && (
+                  <ProjectEmptyState projectId={project.id} projectStatus={project.status} />
+                )}
+              </div>
             </div>
-          </div>
+          )}
         </TabsContent>
 
         {/* ── prompts tab ── */}

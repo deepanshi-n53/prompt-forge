@@ -17,6 +17,17 @@ export async function callAI(
 ): Promise<AIResponse> {
   const provider = process.env.AI_PROVIDER ?? 'openai'
 
+  if (provider === 'mock') {
+    const sectionNum = messages[messages.length - 1]?.content?.match(/SECTION TEMPLATE.*?(\d+)/)?.[1] ?? '01'
+    return {
+      text: JSON.stringify({
+        content: `# Section ${sectionNum} - Generated Architecture\n\nThis is a mock generated prompt for section ${sectionNum}.\nReplace AI_PROVIDER=openai in Railway to get real AI-generated content.`,
+        confidence: 0.9,
+        assumptions: [],
+      }),
+    }
+  }
+
   if (provider === 'ollama') {
     const ollama = new Ollama({
       host: process.env.OLLAMA_BASE_URL ?? 'http://localhost:11434',
