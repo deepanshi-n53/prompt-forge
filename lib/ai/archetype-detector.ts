@@ -11,13 +11,13 @@ const SIGNALS: Record<string, string[]> = {
 export function detectArchetype(parsedBRD: ParsedBRD): { archetype: string; confidence: number } {
   // Build a single lowercase text blob from all relevant BRD fields
   const corpus = [
-    parsedBRD.productPurpose,
-    parsedBRD.monetizationModel,
-    parsedBRD.scalingHints,
-    ...parsedBRD.userTypes,
-    ...parsedBRD.coreFeatures.map((f) => `${f.name} ${f.description} ${f.category}`),
-    ...parsedBRD.complianceHints,
-    ...parsedBRD.integrationHints,
+    parsedBRD.productPurpose   ?? '',
+    parsedBRD.monetizationModel ?? '',
+    parsedBRD.scalingHints     ?? '',
+    ...(Array.isArray(parsedBRD.userTypes)       ? parsedBRD.userTypes       : []),
+    ...(Array.isArray(parsedBRD.coreFeatures)    ? parsedBRD.coreFeatures.map((f) => `${f.name} ${f.description} ${f.category}`) : []),
+    ...(Array.isArray(parsedBRD.complianceHints) ? parsedBRD.complianceHints : []),
+    ...(Array.isArray(parsedBRD.integrationHints) ? parsedBRD.integrationHints : []),
   ]
     .join(' ')
     .toLowerCase()

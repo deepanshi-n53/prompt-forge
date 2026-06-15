@@ -1,10 +1,51 @@
 import { callAI } from './ai-client'
 import type { ParsedBRD } from '@/types'
 
+const SYSTEM_PROMPT = `You are a senior software architect. Extract structured information from the BRD document.
+
+Return ONLY valid JSON with this exact schema (no markdown fences, no prose outside the JSON):
+{
+  "archetype": string,
+  "archetypeConfidence": number,
+  "productPurpose": string,
+  "userTypes": string[],
+  "coreFeatures": [{ "id": string, "name": string, "description": string, "category": string, "priority": "MUST"|"SHOULD"|"COULD"|"WONT" }],
+  "platform": "web"|"mobile"|"both",
+  "complianceHints": string[],
+  "integrationHints": string[],
+  "scalingHints": string,
+  "monetizationModel": string,
+  "healthScores": [],
+  "extractedDecisions": {}
+}
+
+archetype must be one of: "b2b-saas", "marketplace", "consumer-app", "ecommerce", "ai-tool"
+All array fields must be arrays even if empty. platform must be one of the three allowed values.`
+
+function normalizeParsedBRD(raw: Record<string, unknown>): ParsedBRD {
+  const validPlatforms = new Set(['web', 'mobile', 'both'])
+  return {
+    archetype:           typeof raw.archetype === 'string' ? raw.archetype : 'b2b-saas',
+    archetypeConfidence: typeof raw.archetypeConfidence === 'number' ? raw.archetypeConfidence : 0,
+    productPurpose:      typeof raw.productPurpose === 'string' ? raw.productPurpose : '',
+    userTypes:           Array.isArray(raw.userTypes) ? (raw.userTypes as string[]) : [],
+    coreFeatures:        Array.isArray(raw.coreFeatures) ? (raw.coreFeatures as ParsedBRD['coreFeatures']) : [],
+    platform:            validPlatforms.has(raw.platform as string) ? (raw.platform as ParsedBRD['platform']) : 'web',
+    complianceHints:     Array.isArray(raw.complianceHints) ? (raw.complianceHints as string[]) : [],
+    integrationHints:    Array.isArray(raw.integrationHints) ? (raw.integrationHints as string[]) : [],
+    scalingHints:        typeof raw.scalingHints === 'string' ? raw.scalingHints : '',
+    monetizationModel:   typeof raw.monetizationModel === 'string' ? raw.monetizationModel : '',
+    healthScores:        Array.isArray(raw.healthScores) ? (raw.healthScores as ParsedBRD['healthScores']) : [],
+    extractedDecisions:  raw.extractedDecisions != null && typeof raw.extractedDecisions === 'object' && !Array.isArray(raw.extractedDecisions)
+                           ? (raw.extractedDecisions as Record<string, unknown>)
+                           : {},
+  }
+}
+
 function safeParse(text: string): ParsedBRD {
-  // Models occasionally wrap JSON in a fence despite instructions
   const stripped = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '').trim()
-  return JSON.parse(stripped) as ParsedBRD
+  const raw = JSON.parse(stripped) as Record<string, unknown>
+  return normalizeParsedBRD(raw)
 }
 
 export async function parseBRDWithAI(rawText: string): Promise<ParsedBRD> {
@@ -33,14 +74,8 @@ export async function parseBRDWithAI(rawText: string): Promise<ParsedBRD> {
 
   const response = await callAI(
     [
-      {
-        role:    'system',
-        content: 'You are a senior software architect. Extract structured information from the BRD. Return ONLY valid JSON matching ParsedBRD schema. No markdown, no explanation, just JSON.',
-      },
-      {
-        role:    'user',
-        content: `Parse this BRD:\n\n${rawText.slice(0, 400_000)}`,
-      },
+      { role: 'system', content: SYSTEM_PROMPT },
+      { role: 'user',   content: `Parse this BRD:\n\n${rawText.slice(0, 400_000)}` },
     ],
     4096,
   )
