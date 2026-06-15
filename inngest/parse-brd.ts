@@ -15,7 +15,7 @@ interface BRDUploadedPayload {
 }
 
 function buildHealthReport(parsed: ParsedBRD): BRDHealthReport {
-  const dimensions = parsed.healthScores
+  const dimensions = parsed.healthScores ?? []
   const total =
     dimensions.length > 0
       ? Math.round(dimensions.reduce((sum, d) => sum + d.score, 0) / dimensions.length)

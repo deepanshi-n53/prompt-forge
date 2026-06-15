@@ -13,6 +13,10 @@ const CSP = [
 
 const nextConfig: NextConfig = {
   output: 'standalone',
+  // pdfjs-dist and mammoth must NOT be bundled by webpack — they rely on
+  // internal dynamic imports (worker files, native addons) that only resolve
+  // correctly when loaded from the real node_modules at runtime.
+  serverExternalPackages: ['pdfjs-dist', 'mammoth'],
   webpack(config, { isServer }) {
     if (isServer) {
       config.resolve.alias = {
