@@ -155,7 +155,7 @@ export function HealthScore({ report }: HealthScoreProps) {
         </div>
       )}
 
-      {report.recommendations.length === 0 && (
+      {report.recommendations.length === 0 && report.total >= 60 && (
         <div className="rounded-lg border border-green-100 bg-green-50 p-4 text-center">
           <p className="text-sm font-medium text-green-700">
             Your BRD covers all key dimensions.

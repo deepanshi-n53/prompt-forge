@@ -3,8 +3,8 @@ import { db } from '@/lib/db/prisma'
 import { extractTextFromStorage } from '@/lib/ai/text-extractor'
 import { parseBRDWithAI } from '@/lib/ai/brd-parser'
 import { detectArchetype } from '@/lib/ai/archetype-detector'
+import { calculateHealthScore } from '@/lib/ai/health-scorer'
 import { setJobState } from '@/lib/jobs/redis'
-import type { BRDHealthReport, ParsedBRD } from '@/types'
 import { Prisma, BRDStatus, ProjectStatus } from '@prisma/client'
 
 interface BRDUploadedPayload {
@@ -12,17 +12,6 @@ interface BRDUploadedPayload {
   projectId: string
   storagePath: string
   mimeType: string
-}
-
-function buildHealthReport(parsed: ParsedBRD): BRDHealthReport {
-  const dimensions = parsed.healthScores ?? []
-  const total =
-    dimensions.length > 0
-      ? Math.round(dimensions.reduce((sum, d) => sum + d.score, 0) / dimensions.length)
-      : 0
-  const gaps = dimensions.flatMap((d) => d.gaps)
-  const recommendations = gaps.slice(0, 10).map((g) => `Address gap: ${g}`)
-  return { total, dimensions, gaps, recommendations }
 }
 
 export const parseBRDJob = inngest.createFunction(
@@ -81,9 +70,9 @@ export const parseBRDJob = inngest.createFunction(
       return result
     })
 
-    // 3. Calculate health score
+    // 3. Calculate health score from parsed fields + raw text
     const healthReport = await step.run('health-score', async () => {
-      const report = buildHealthReport(parsedBRD)
+      const report = calculateHealthScore(parsedBRD, rawText)
       await setJobState(projectId, {
         status:  'running',
         percent: 72,
