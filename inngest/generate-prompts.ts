@@ -2,6 +2,7 @@ import { inngest } from '@/inngest/client'
 import { db } from '@/lib/db/prisma'
 import { generateSection } from '@/lib/ai/prompt-generator'
 import { getTemplatesForTrack } from '@/lib/ai/section-templates'
+import type { SectionTemplate } from '@/lib/ai/section-templates'
 import { sendPromptsReadyEmail } from '@/lib/email'
 import { setJobState } from '@/lib/jobs/redis'
 import { Prisma, ProjectStatus, Track, PromptStatus } from '@prisma/client'
@@ -16,13 +17,70 @@ interface BRDAnsweredPayload {
   userAnswers:     Record<string, string>
 }
 
-const BATCH_SIZE = 3
+// Cascade order — foundational decisions first so later sections can reference them
+const CASCADE_ORDER = [
+  '01','05','06','07','08','02','03','04',
+  '09','10','11','12','13','14','15',
+  '16','17','18','19','20','21','22',
+  '23','24','25','26','27','28','29',
+  '30','31','32',
+  'W1','W2','W3','W4','W5','W6','W7','W8',
+  'M1','M2','M3','M4','M5','M6','M7','M8','M9','M10','M11','M12',
+  '3A','3B','3C','3D','3E',
+]
+
+const ARCHETYPE_TO_L3: Record<string, string> = {
+  marketplace:    '3A',
+  ecommerce:      '3A',
+  'consumer-app': '3B',
+  'ai-tool':      '3C',
+  'b2b-saas':     '3D',
+}
+
+function selectSections(
+  allTemplates: SectionTemplate[],
+  parsedBRD:    ParsedBRD,
+  track:        'FAST' | 'FULL',
+): string[] {
+  const platform  = parsedBRD.platform  ?? 'web'
+  const archetype = parsedBRD.archetype ?? ''
+
+  // L1 — always included
+  let selected = allTemplates.filter(t => t.layer === 'L1').map(t => t.num)
+
+  // L2A (web)
+  if (platform === 'web' || platform === 'both') {
+    selected = [...selected, ...allTemplates.filter(t => t.layer === 'L2A').map(t => t.num)]
+  }
+
+  // L2B (mobile)
+  if (platform === 'mobile' || platform === 'both') {
+    selected = [...selected, ...allTemplates.filter(t => t.layer === 'L2B').map(t => t.num)]
+  }
+
+  // L3 — app-type specific
+  const l3Num = ARCHETYPE_TO_L3[archetype]
+  if (l3Num && allTemplates.find(t => t.num === l3Num)) {
+    selected.push(l3Num)
+  }
+
+  // Remove FULL_ONLY sections when on Fast track
+  if (track === 'FAST') {
+    selected = selected.filter(num => {
+      const t = allTemplates.find(t => t.num === num)
+      return t?.track !== 'FULL'
+    })
+  }
+
+  // Return in cascade order (foundational first)
+  return CASCADE_ORDER.filter(num => selected.includes(num))
+}
 
 export const generatePromptsJob = inngest.createFunction(
   {
     id:       'generate-prompts',
     retries:  3,
-    timeouts: { finish: '10m' },
+    timeouts: { finish: '15m' },
     triggers: [{ event: 'brd/answered' }],
     onFailure: async ({ event }) => {
       const { projectId } = (
@@ -49,6 +107,8 @@ export const generatePromptsJob = inngest.createFunction(
 
     const track = trackRaw === 'FAST' ? 'FAST' : 'FULL'
 
+    // ── Step 1: Load project data ─────────────────────────────────────────────
+
     const { decisionGraph, parsedBRD, brdVersion, ownerEmail, ownerName, projectName } =
       await step.run('load-decisions', async () => {
         const [graphRecord, brdRecord, project] = await Promise.all([
@@ -73,9 +133,9 @@ export const generatePromptsJob = inngest.createFunction(
 
         await setJobState(projectId, {
           status:  'running',
-          percent: 15,
+          percent: 10,
           step:    'load-decisions',
-          message: 'Loading project data...',
+          message: 'Loading project data…',
         })
 
         return {
@@ -88,82 +148,99 @@ export const generatePromptsJob = inngest.createFunction(
         }
       })
 
-    const templates = await step.run('select-sections', async () => {
-      // Layer 1 (universal) + Layer 2A (web) for standard generation.
-      // Layer 2B and Layer 3 are run separately per platform/app-type.
-      const selected = getTemplatesForTrack(track).filter(
-        (t) => t.layer === 'L1' || t.layer === 'L2A',
-      )
+    // ── Step 2: Select sections in cascade order ──────────────────────────────
+
+    const orderedNums = await step.run('select-sections', async () => {
+      const allTemplates = getTemplatesForTrack(track)
+      const selected     = selectSections(allTemplates, parsedBRD, track)
 
       await setJobState(projectId, {
         status:  'running',
-        percent: 20,
+        percent: 15,
         step:    'select-sections',
-        message: `Planning ${selected.length} architecture sections...`,
+        message: `Planning ${selected.length} architecture sections in cascade order…`,
       })
 
       return selected
     })
 
-    const totalBatches = Math.ceil(templates.length / BATCH_SIZE)
+    // ── Step 3: Cascade generation — sequential, each section gets locked decisions ─
 
-    for (let i = 0; i < templates.length; i += BATCH_SIZE) {
-      const batch      = templates.slice(i, i + BATCH_SIZE)
-      const batchIndex = i / BATCH_SIZE
-      const batchPct   = 20 + Math.round(((batchIndex + 1) / totalBatches) * 65)
+    // Seed locked decisions from BRD + user answers
+    const lockedDecisions: Record<string, string> = {
+      productPurpose:    parsedBRD.productPurpose    ?? '',
+      archetype:         parsedBRD.archetype         ?? '',
+      platform:          parsedBRD.platform          ?? 'web',
+      monetizationModel: parsedBRD.monetizationModel ?? '',
+      billingModel:      userAnswers.q1 ?? 'Monthly subscription',
+      launchRegion:      userAnswers.q2 ?? 'Single country',
+      timeline:          userAnswers.q3 ?? '3-6 months',
+      sensitiveData:     userAnswers.q4 ?? 'None',
+      userScale:         userAnswers.q5 ?? '1,000-10,000',
+      track,
+    }
 
-      await Promise.all(
-        batch.map((tmpl) =>
-          step.run(`generate-${tmpl.num}`, async () => {
-            const result = await generateSection(
-              tmpl.num,
-              tmpl.prompt,
-              parsedBRD,
-              decisionGraph,
-              userAnswers,
-            )
+    const allTemplates     = getTemplatesForTrack(track)
+    const totalSections    = orderedNums.length
+    let   completedCount   = 0
 
-            await db.generatedPrompt.upsert({
-              where: {
-                projectId_sectionNum_brdVersion: {
-                  projectId,
-                  sectionNum: tmpl.num,
-                  brdVersion,
-                },
-              },
-              create: {
-                projectId,
-                sectionNum:  tmpl.num,
-                sectionName: tmpl.name,
-                layer:       tmpl.layer,
-                track:       track as Track,
-                content:     result.content,
-                confidence:  result.confidence,
-                assumptions: result.assumptions as unknown as Prisma.InputJsonValue,
-                status:      PromptStatus.GENERATED,
-                brdVersion,
-              },
-              update: {
-                content:     result.content,
-                confidence:  result.confidence,
-                assumptions: result.assumptions as unknown as Prisma.InputJsonValue,
-                status:      PromptStatus.GENERATED,
-              },
-            })
+    for (const sectionNum of orderedNums) {
+      const tmpl = allTemplates.find(t => t.num === sectionNum)
+      if (!tmpl) continue
 
-            return { sectionNum: tmpl.num, confidence: result.confidence }
-          }),
-        ),
-      )
+      await step.run(`generate-${sectionNum}`, async () => {
+        const result = await generateSection(
+          sectionNum,
+          tmpl.template,
+          parsedBRD,
+          decisionGraph,
+          userAnswers,
+          lockedDecisions,
+        )
 
-      const completedSections = Math.min(i + BATCH_SIZE, templates.length)
-      await setJobState(projectId, {
-        status:  'running',
-        percent: batchPct,
-        step:    `generate-${batch[0].num}`,
-        message: `Generated ${completedSections} of ${templates.length} sections...`,
+        // Merge new decisions into cascade context for subsequent sections
+        if (result.decisions && Object.keys(result.decisions).length > 0) {
+          Object.assign(lockedDecisions, result.decisions)
+        }
+
+        await db.generatedPrompt.upsert({
+          where: {
+            projectId_sectionNum_brdVersion: { projectId, sectionNum, brdVersion },
+          },
+          create: {
+            projectId,
+            sectionNum,
+            sectionName: tmpl.name,
+            layer:       tmpl.layer,
+            track:       track as Track,
+            content:     result.content,
+            confidence:  result.confidence,
+            assumptions: result.assumptions as unknown as Prisma.InputJsonValue,
+            status:      PromptStatus.GENERATED,
+            brdVersion,
+          },
+          update: {
+            content:     result.content,
+            confidence:  result.confidence,
+            assumptions: result.assumptions as unknown as Prisma.InputJsonValue,
+            status:      PromptStatus.GENERATED,
+          },
+        })
+
+        completedCount++
+        const pct = 15 + Math.round((completedCount / totalSections) * 75)
+        await setJobState(projectId, {
+          status:  'running',
+          percent: pct,
+          step:    `generate-${sectionNum}`,
+          message: `§${sectionNum} complete (${completedCount}/${totalSections})…`,
+        })
+
+        return { sectionNum, confidence: result.confidence }
       })
     }
+
+    // ── Step 4: Mark project READY ────────────────────────────────────────────
 
     await step.run('update-project', async () => {
       await db.project.update({
@@ -174,20 +251,20 @@ export const generatePromptsJob = inngest.createFunction(
         status:  'running',
         percent: 95,
         step:    'update-project',
-        message: 'Finalising...',
+        message: 'Finalising…',
       })
     })
 
+    // ── Step 5: Notify user ───────────────────────────────────────────────────
+
     await step.run('notify-user', async () => {
       if (ownerEmail) {
-        await sendPromptsReadyEmail(
-          ownerEmail, ownerName, projectName, templates.length, projectId,
-        )
+        await sendPromptsReadyEmail(ownerEmail, ownerName, projectName, orderedNums.length, projectId)
       }
 
       await inngest.send({
         name: 'prompts/generated',
-        data: { projectId, sectionCount: templates.length, track },
+        data: { projectId, sectionCount: orderedNums.length, track },
       })
 
       await setJobState(projectId, {
@@ -195,10 +272,10 @@ export const generatePromptsJob = inngest.createFunction(
         percent: 100,
         step:    'done',
         message: 'All prompts are ready!',
-        result:  { projectId, sectionCount: templates.length },
+        result:  { projectId, sectionCount: orderedNums.length },
       })
     })
 
-    return { projectId, sectionsGenerated: templates.length, track }
+    return { projectId, sectionsGenerated: orderedNums.length, track }
   },
 )
