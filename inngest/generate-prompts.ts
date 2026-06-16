@@ -202,23 +202,27 @@ export const generatePromptsJob = inngest.createFunction(
 
       // Before §09 (Real-time): ask if not answered and not obvious from BRD
       if (sectionNum === '09' && !lockedDecisions['realtimeNeeded']) {
-        await setJobState(projectId, {
-          status:  'paused',
-          percent: 15 + Math.round((completedIdx / totalSections) * 75),
-          step:    'pause-realtime',
-          message: 'One quick question before §09 Real-time…',
-          pauseQuestion: {
-            field:        'realtimeNeeded',
-            sectionNum:   '09',
-            question:     'Does your app need real-time updates?',
-            subtitle:     'Shapes §09 Real-time & Live Data — websockets, SSE, or polling strategy',
-            options: [
-              { value: 'yes', label: 'Yes — live updates', description: 'Chat, notifications, live dashboards, real-time feeds' },
-              { value: 'no',  label: 'No — standard refresh', description: 'Page reloads and periodic polling are fine' },
-            ],
-            defaultValue: 'no',
-          },
-        })
+        // Write the paused state inside a step so it is memoized — otherwise this
+        // raw side-effect re-fires on every Inngest replay and flickers Redis.
+        await step.run('pause-state-realtime', () =>
+          setJobState(projectId, {
+            status:  'paused',
+            percent: 15 + Math.round((completedIdx / totalSections) * 75),
+            step:    'pause-realtime',
+            message: 'One quick question before §09 Real-time…',
+            pauseQuestion: {
+              field:        'realtimeNeeded',
+              sectionNum:   '09',
+              question:     'Does your app need real-time updates?',
+              subtitle:     'Shapes §09 Real-time & Live Data — websockets, SSE, or polling strategy',
+              options: [
+                { value: 'yes', label: 'Yes — live updates', description: 'Chat, notifications, live dashboards, real-time feeds' },
+                { value: 'no',  label: 'No — standard refresh', description: 'Page reloads and periodic polling are fine' },
+              ],
+              defaultValue: 'no',
+            },
+          }),
+        )
 
         const realtimeEvent = await step.waitForEvent('wait-realtime-answer', {
           event:   'brd/pause-answered',
@@ -232,23 +236,25 @@ export const generatePromptsJob = inngest.createFunction(
       if (sectionNum === '20') {
         const alreadyKnown = lockedDecisions['sensitiveData'] !== 'None' && lockedDecisions['sensitiveData']
         if (!alreadyKnown || lockedDecisions['sensitiveData'] === 'Unknown') {
-          await setJobState(projectId, {
-            status:  'paused',
-            percent: 15 + Math.round((completedIdx / totalSections) * 75),
-            step:    'pause-compliance',
-            message: 'One quick compliance question before §20…',
-            pauseQuestion: {
-              field:        'complianceConfirmed',
-              sectionNum:   '20',
-              question:     'Confirm: your app does NOT handle human health data, correct?',
-              subtitle:     'This is critical — HIPAA compliance changes the entire §20 architecture',
-              options: [
-                { value: 'confirmed-no-health',    label: 'Correct — no health data',       description: 'Standard privacy rules apply — no HIPAA needed' },
-                { value: 'actually-yes-health',    label: 'Wait — we do handle health data', description: 'Enable full HIPAA-compliant security architecture' },
-              ],
-              defaultValue: 'confirmed-no-health',
-            },
-          })
+          await step.run('pause-state-compliance', () =>
+            setJobState(projectId, {
+              status:  'paused',
+              percent: 15 + Math.round((completedIdx / totalSections) * 75),
+              step:    'pause-compliance',
+              message: 'One quick compliance question before §20…',
+              pauseQuestion: {
+                field:        'complianceConfirmed',
+                sectionNum:   '20',
+                question:     'Confirm: your app does NOT handle human health data, correct?',
+                subtitle:     'This is critical — HIPAA compliance changes the entire §20 architecture',
+                options: [
+                  { value: 'confirmed-no-health',    label: 'Correct — no health data',       description: 'Standard privacy rules apply — no HIPAA needed' },
+                  { value: 'actually-yes-health',    label: 'Wait — we do handle health data', description: 'Enable full HIPAA-compliant security architecture' },
+                ],
+                defaultValue: 'confirmed-no-health',
+              },
+            }),
+          )
 
           const complianceEvent = await step.waitForEvent('wait-compliance-answer', {
             event:   'brd/pause-answered',
@@ -266,23 +272,25 @@ export const generatePromptsJob = inngest.createFunction(
 
       // Before §31 (i18n): ask about multi-language support
       if (sectionNum === '31' && !lockedDecisions['multiLanguage']) {
-        await setJobState(projectId, {
-          status:  'paused',
-          percent: 15 + Math.round((completedIdx / totalSections) * 75),
-          step:    'pause-i18n',
-          message: 'One quick question before §31 Internationalisation…',
-          pauseQuestion: {
-            field:        'multiLanguage',
-            sectionNum:   '31',
-            question:     'Will your app support multiple languages?',
-            subtitle:     'Shapes §31 i18n architecture — locale files, RTL support, date/currency formatting',
-            options: [
-              { value: 'no',  label: 'English only',          description: 'Single language — simpler architecture' },
-              { value: 'yes', label: 'Multiple languages',    description: 'Full i18n with locale files and RTL support if needed' },
-            ],
-            defaultValue: 'no',
-          },
-        })
+        await step.run('pause-state-i18n', () =>
+          setJobState(projectId, {
+            status:  'paused',
+            percent: 15 + Math.round((completedIdx / totalSections) * 75),
+            step:    'pause-i18n',
+            message: 'One quick question before §31 Internationalisation…',
+            pauseQuestion: {
+              field:        'multiLanguage',
+              sectionNum:   '31',
+              question:     'Will your app support multiple languages?',
+              subtitle:     'Shapes §31 i18n architecture — locale files, RTL support, date/currency formatting',
+              options: [
+                { value: 'no',  label: 'English only',          description: 'Single language — simpler architecture' },
+                { value: 'yes', label: 'Multiple languages',    description: 'Full i18n with locale files and RTL support if needed' },
+              ],
+              defaultValue: 'no',
+            },
+          }),
+        )
 
         const i18nEvent = await step.waitForEvent('wait-i18n-answer', {
           event:   'brd/pause-answered',

@@ -188,9 +188,15 @@ export function GeneratingView({ projectId, jobId, isOnboarding = false }: Gener
     return () => { if (slowTimer.current) clearTimeout(slowTimer.current) }
   }, [progress.status, slow])
 
-  const [pauseAnswered, setPauseAnswered] = useState(false)
+  // Track which pause question was answered (by field), NOT a one-shot boolean —
+  // a single generation can pause multiple times (§09, §20, §31), so we must
+  // re-show the modal for each distinct question.
+  const [answeredField, setAnsweredField] = useState<string | null>(null)
+  const currentPauseField = progress.pauseQuestion?.field ?? null
 
-  const isPaused   = progress.status === 'paused' && !pauseAnswered
+  const isPaused   = progress.status === 'paused'
+    && !!progress.pauseQuestion
+    && answeredField !== currentPauseField
   const isFailed   = progress.status === 'failed'  || dbStatus === 'error'
   const isComplete = progress.status === 'complete' || dbStatus === 'ready'
   // When DB says ready but Redis has no data, show 100%
@@ -201,9 +207,10 @@ export function GeneratingView({ projectId, jobId, isOnboarding = false }: Gener
       {/* Mid-generation pause modal */}
       {isPaused && progress.pauseQuestion && (
         <GenerationPauseModal
+          key={progress.pauseQuestion.field}
           projectId={projectId}
           pauseQuestion={progress.pauseQuestion}
-          onAnswered={() => setPauseAnswered(true)}
+          onAnswered={() => setAnsweredField(progress.pauseQuestion!.field)}
         />
       )}
 
