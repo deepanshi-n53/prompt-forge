@@ -133,19 +133,48 @@ interface GeneratingViewProps {
 export function GeneratingView({ projectId, jobId, isOnboarding = false }: GeneratingViewProps) {
   const router      = useRouter()
   const progress    = useJobProgress(jobId)
-  const [slow, setSlow] = useState(false)
-  const slowTimer   = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [slow, setSlow]         = useState(false)
+  const [dbStatus, setDbStatus] = useState<'ready' | 'error' | null>(null)
+  const slowTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // Redirect on completion
+  // DB fallback poll — works even if Redis/SSE is not configured
+  // Polls project status directly; if READY → redirect, if ERROR → show error
   useEffect(() => {
-    if (progress.status === 'complete') {
+    // Redis is working — no need for DB poll
+    if (progress.status === 'complete' || progress.status === 'failed') return
+
+    let cancelled = false
+
+    async function poll() {
+      if (cancelled) return
+      try {
+        const res = await fetch(`/api/projects/${projectId}`)
+        if (!res.ok || cancelled) return
+        const data = await res.json() as { project?: { status: string } }
+        const status = data.project?.status
+        if (status === 'READY') setDbStatus('ready')
+        else if (status === 'ERROR') setDbStatus('error')
+      } catch { /* ignore network errors */ }
+    }
+
+    poll()
+    const interval = setInterval(poll, 5_000)
+    return () => {
+      cancelled = true
+      clearInterval(interval)
+    }
+  }, [progress.status, projectId])
+
+  // Redirect on completion (from Redis or DB fallback)
+  useEffect(() => {
+    if (progress.status === 'complete' || dbStatus === 'ready') {
       const dest = isOnboarding
         ? `/project/${projectId}/prompts?onboarding=1`
         : `/project/${projectId}/prompts`
       const t = setTimeout(() => router.push(dest), 1200)
       return () => clearTimeout(t)
     }
-  }, [progress.status, projectId, isOnboarding, router])
+  }, [progress.status, dbStatus, projectId, isOnboarding, router])
 
   // Start slow-timer when generation begins, cancel on completion/failure
   useEffect(() => {
@@ -158,8 +187,10 @@ export function GeneratingView({ projectId, jobId, isOnboarding = false }: Gener
     return () => { if (slowTimer.current) clearTimeout(slowTimer.current) }
   }, [progress.status, slow])
 
-  const isFailed   = progress.status === 'failed'
-  const isComplete = progress.status === 'complete'
+  const isFailed   = progress.status === 'failed'  || dbStatus === 'error'
+  const isComplete = progress.status === 'complete' || dbStatus === 'ready'
+  // When DB says ready but Redis has no data, show 100%
+  const displayPercent = dbStatus === 'ready' ? 100 : progress.percent
 
   return (
     <div className="flex min-h-full flex-col items-center justify-center px-4 py-12">
@@ -172,7 +203,7 @@ export function GeneratingView({ projectId, jobId, isOnboarding = false }: Gener
               ✕
             </div>
           ) : (
-            <Ring percent={progress.percent} />
+            <Ring percent={displayPercent} />
           )}
 
           <div className="space-y-1">
@@ -201,7 +232,7 @@ export function GeneratingView({ projectId, jobId, isOnboarding = false }: Gener
                   'h-2 rounded-full transition-all duration-700',
                   isComplete ? 'bg-green-500' : 'bg-indigo-500',
                 )}
-                style={{ width: `${progress.percent}%` }}
+                style={{ width: `${displayPercent}%` }}
               />
             </div>
             {progress.step && progress.step !== 'done' && progress.step !== 'setup' && (
@@ -212,7 +243,7 @@ export function GeneratingView({ projectId, jobId, isOnboarding = false }: Gener
 
         {/* section skeletons — visible while generating */}
         {!isFailed && !isComplete && (
-          <SectionSkeletons percent={progress.percent} />
+          <SectionSkeletons percent={displayPercent} />
         )}
 
         {/* error state */}

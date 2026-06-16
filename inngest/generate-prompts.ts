@@ -180,28 +180,27 @@ export const generatePromptsJob = inngest.createFunction(
       track,
     }
 
-    const allTemplates     = getTemplatesForTrack(track)
-    const totalSections    = orderedNums.length
-    let   completedCount   = 0
+    const allTemplates  = getTemplatesForTrack(track)
+    const totalSections = orderedNums.length
+    let   completedIdx  = 0
 
     for (const sectionNum of orderedNums) {
       const tmpl = allTemplates.find(t => t.num === sectionNum)
       if (!tmpl) continue
 
-      await step.run(`generate-${sectionNum}`, async () => {
+      // Capture current snapshot — Inngest callbacks don't re-run on replay,
+      // so we pass lockedDecisions BY VALUE (spread) at the time this step queues.
+      const decisionsSnapshot = { ...lockedDecisions }
+
+      const stepResult = await step.run(`generate-${sectionNum}`, async () => {
         const result = await generateSection(
           sectionNum,
           tmpl.template,
           parsedBRD,
           decisionGraph,
           userAnswers,
-          lockedDecisions,
+          decisionsSnapshot,
         )
-
-        // Merge new decisions into cascade context for subsequent sections
-        if (result.decisions && Object.keys(result.decisions).length > 0) {
-          Object.assign(lockedDecisions, result.decisions)
-        }
 
         await db.generatedPrompt.upsert({
           where: {
@@ -227,16 +226,28 @@ export const generatePromptsJob = inngest.createFunction(
           },
         })
 
-        completedCount++
-        const pct = 15 + Math.round((completedCount / totalSections) * 75)
-        await setJobState(projectId, {
-          status:  'running',
-          percent: pct,
-          step:    `generate-${sectionNum}`,
-          message: `§${sectionNum} complete (${completedCount}/${totalSections})…`,
-        })
+        // Return decisions so we can accumulate them OUTSIDE the callback
+        // (Inngest memoizes this return value, so it's available on replay too)
+        return {
+          sectionNum,
+          confidence: result.confidence,
+          decisions:  result.decisions ?? {},
+        }
+      })
 
-        return { sectionNum, confidence: result.confidence }
+      // Accumulate outside the callback — runs on every invoke (fresh + replay)
+      // so downstream sections always receive the full cascade context
+      if (stepResult.decisions && Object.keys(stepResult.decisions).length > 0) {
+        Object.assign(lockedDecisions, stepResult.decisions)
+      }
+
+      completedIdx++
+      const pct = 15 + Math.round((completedIdx / totalSections) * 75)
+      await setJobState(projectId, {
+        status:  'running',
+        percent: pct,
+        step:    `generate-${sectionNum}`,
+        message: `§${sectionNum} complete (${completedIdx}/${totalSections})…`,
       })
     }
 
