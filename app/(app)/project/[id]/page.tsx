@@ -170,8 +170,35 @@ export default async function ProjectPage({
                 )}
               </div>
 
-              {/* assumptions + suggestions */}
+              {/* right column: next-step CTA + assumptions + suggestions */}
               <div className="space-y-6 lg:col-span-2">
+
+                {/* ── PARSED: prominent next-step card ── */}
+                {project.status === 'PARSED' && (
+                  <div className="rounded-xl border border-indigo-200 bg-gradient-to-br from-indigo-50 to-violet-50 p-6">
+                    <div className="flex items-start gap-4">
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-indigo-100 text-indigo-600 text-lg">
+                        ✓
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <h2 className="text-base font-semibold text-indigo-900">
+                          BRD analysed — one step left
+                        </h2>
+                        <p className="mt-1 text-sm text-indigo-700">
+                          Answer 5 quick questions so we can tailor your architecture to your timeline,
+                          market, and scale. Takes about 2 minutes.
+                        </p>
+                        <Link
+                          href={`/project/${project.id}/setup`}
+                          className={cn(buttonVariants(), 'mt-4')}
+                        >
+                          Configure &amp; Generate prompts →
+                        </Link>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {assumptions.length > 0 && (
                   <div>
                     <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-zinc-500">
