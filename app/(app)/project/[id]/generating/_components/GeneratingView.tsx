@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useJobProgress } from '@/hooks/useJobProgress'
+import { GenerationPauseModal } from '@/components/shared/GenerationPauseModal'
 import { cn } from '@/lib/utils'
 
 const SLOW_THRESHOLD_MS = 30_000
@@ -187,6 +188,9 @@ export function GeneratingView({ projectId, jobId, isOnboarding = false }: Gener
     return () => { if (slowTimer.current) clearTimeout(slowTimer.current) }
   }, [progress.status, slow])
 
+  const [pauseAnswered, setPauseAnswered] = useState(false)
+
+  const isPaused   = progress.status === 'paused' && !pauseAnswered
   const isFailed   = progress.status === 'failed'  || dbStatus === 'error'
   const isComplete = progress.status === 'complete' || dbStatus === 'ready'
   // When DB says ready but Redis has no data, show 100%
@@ -194,6 +198,15 @@ export function GeneratingView({ projectId, jobId, isOnboarding = false }: Gener
 
   return (
     <div className="flex min-h-full flex-col items-center justify-center px-4 py-12">
+      {/* Mid-generation pause modal */}
+      {isPaused && progress.pauseQuestion && (
+        <GenerationPauseModal
+          projectId={projectId}
+          pauseQuestion={progress.pauseQuestion}
+          onAnswered={() => setPauseAnswered(true)}
+        />
+      )}
+
       <div className="w-full max-w-sm space-y-6 text-center">
 
         {/* ring + status */}
@@ -212,11 +225,13 @@ export function GeneratingView({ projectId, jobId, isOnboarding = false }: Gener
                 'text-xl font-bold',
                 isFailed   ? 'text-red-700'
                 : isComplete ? 'text-green-700'
+                : isPaused   ? 'text-amber-700'
                 : 'text-zinc-900',
               )}
             >
               {isFailed   ? 'Generation failed'
               : isComplete ? 'Architecture ready!'
+              : isPaused   ? 'Waiting for your answer…'
               : 'Generating your architecture…'}
             </h2>
             <p className="text-sm text-zinc-500">{progress.message}</p>

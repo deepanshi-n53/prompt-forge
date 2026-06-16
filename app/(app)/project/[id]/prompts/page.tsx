@@ -108,17 +108,57 @@ export default async function PromptsPage({
 
       {/* content */}
       {prompts.length === 0 ? (
-        <div className="flex flex-1 flex-col items-center justify-center gap-3 text-center">
-          <p className="text-sm font-medium text-zinc-700">No prompts generated yet</p>
-          <p className="text-xs text-zinc-400">
-            Complete the setup wizard to generate your architecture prompts.
-          </p>
-          <Link
-            href={`/project/${id}/setup`}
-            className="mt-2 rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700"
-          >
-            Start setup →
-          </Link>
+        <div className="flex flex-1 flex-col items-center justify-center gap-4 text-center px-4">
+          {project.status === 'PROCESSING' ? (
+            <>
+              <div className="flex h-14 w-14 items-center justify-center rounded-full bg-blue-50 text-2xl animate-pulse">⚙</div>
+              <div>
+                <p className="text-sm font-semibold text-zinc-800">Generation in progress</p>
+                <p className="mt-1 text-xs text-zinc-400">
+                  Your prompts are being generated. This can take 60–120 seconds.
+                </p>
+              </div>
+              <Link
+                href={`/project/${id}/generating?jobId=${id}`}
+                className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700"
+              >
+                Watch progress →
+              </Link>
+            </>
+          ) : project.status === 'ERROR' ? (
+            <>
+              <div className="flex h-14 w-14 items-center justify-center rounded-full bg-red-50 text-2xl">✕</div>
+              <div>
+                <p className="text-sm font-semibold text-zinc-800">Generation failed</p>
+                <p className="mt-1 text-xs text-zinc-400">
+                  Something went wrong during generation. You can retry from setup.
+                </p>
+              </div>
+              <Link
+                href={`/project/${id}/setup`}
+                className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700"
+              >
+                Retry from setup →
+              </Link>
+            </>
+          ) : (
+            <>
+              <div className="flex h-14 w-14 items-center justify-center rounded-full bg-zinc-50 text-2xl">◻</div>
+              <div>
+                <p className="text-sm font-semibold text-zinc-800">No prompts yet</p>
+                <p className="mt-1 text-xs text-zinc-400 max-w-xs mx-auto">
+                  Complete the setup wizard to generate your {project.track === 'FAST' ? 'Fast Track' : 'Full'} architecture prompts.
+                </p>
+                <p className="mt-1 text-[10px] text-zinc-300">Project status: {project.status}</p>
+              </div>
+              <Link
+                href={`/project/${id}/setup`}
+                className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700"
+              >
+                Start setup →
+              </Link>
+            </>
+          )}
         </div>
       ) : (
         <div className="flex-1 overflow-hidden">

@@ -60,6 +60,7 @@ export function useJobProgress(jobId: string | null): JobProgress {
           const { state } = (await res.json()) as { state: JobProgress | null }
           if (state) {
             apply(state)
+            // Keep polling during 'paused' — job will resume after user answers
             if (state.status === 'complete' || state.status === 'failed') {
               teardown()
             }
@@ -83,6 +84,7 @@ export function useJobProgress(jobId: string | null): JobProgress {
         try {
           const data = JSON.parse(event.data) as JobProgress
           apply(data)
+          // Keep SSE open during 'paused' — the function will resume and send more events
           if (data.status === 'complete' || data.status === 'failed') {
             teardown()
           }

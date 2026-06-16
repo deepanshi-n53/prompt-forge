@@ -3,77 +3,109 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { cn } from '@/lib/utils'
-import type { BRDInsight, GapQuestion } from '@/lib/ai/gap-analyzer'
+import type { InsightGroup, GapQuestion } from '@/lib/ai/gap-analyzer'
 
-// ── Confidence badge ──────────────────────────────────────────────────────────
+// ── Confidence dot ────────────────────────────────────────────────────────────
 
 function ConfidenceDot({ level }: { level: 'HIGH' | 'MEDIUM' | 'UNKNOWN' }) {
-  if (level === 'HIGH')    return <span className="inline-block w-2 h-2 rounded-full bg-green-500 mr-1.5" />
-  if (level === 'MEDIUM')  return <span className="inline-block w-2 h-2 rounded-full bg-amber-400 mr-1.5" />
-  return <span className="inline-block w-2 h-2 rounded-full bg-zinc-300 mr-1.5" />
+  if (level === 'HIGH')    return <span className="mt-0.5 inline-block h-2 w-2 shrink-0 rounded-full bg-green-500" />
+  if (level === 'MEDIUM')  return <span className="mt-0.5 inline-block h-2 w-2 shrink-0 rounded-full bg-amber-400" />
+  return <span className="mt-0.5 inline-block h-2 w-2 shrink-0 rounded-full bg-zinc-300" />
 }
 
 // ── BRD Insights summary screen ───────────────────────────────────────────────
 
 function InsightsSummary({
-  insights,
+  insightGroups,
   gapCount,
+  confirmed,
+  inferred,
+  unknown,
   onContinue,
 }: {
-  insights: BRDInsight[]
-  gapCount: number
+  insightGroups: InsightGroup[]
+  gapCount:  number
+  confirmed: number
+  inferred:  number
+  unknown:   number
   onContinue: () => void
 }) {
   return (
-    <div className="w-full max-w-xl">
-      <div className="mb-6 rounded-xl border border-zinc-200 bg-white p-5">
-        <h2 className="mb-1 text-sm font-semibold uppercase tracking-wide text-zinc-500">
+    <div className="w-full max-w-2xl">
+      <div className="mb-5 rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
+        <h2 className="mb-0.5 text-sm font-semibold uppercase tracking-wide text-zinc-500">
           What I understood from your BRD
         </h2>
-        <p className="mb-4 text-xs text-zinc-400">
-          Extracted automatically — review below, then answer {gapCount} question{gapCount !== 1 ? 's' : ''} to complete your setup
+        <p className="mb-5 text-xs text-zinc-400">
+          Extracted automatically from your document — review below, then answer{' '}
+          {gapCount === 0 ? 'no questions — everything is set!' : `${gapCount} question${gapCount !== 1 ? 's' : ''} to complete your setup`}
         </p>
-        <div className="space-y-2.5">
-          {insights.map((insight) => (
-            <div key={insight.label} className="flex items-start gap-2">
-              <ConfidenceDot level={insight.confidence} />
-              <div className="min-w-0">
-                <span className="text-xs font-medium text-zinc-500">{insight.label}: </span>
-                <span className={cn(
-                  'text-xs',
-                  insight.confidence === 'UNKNOWN' ? 'text-zinc-400 italic' : 'text-zinc-800 font-medium',
-                )}>
-                  {insight.value}
-                </span>
-                {insight.reason && insight.confidence !== 'HIGH' && (
-                  <span className="ml-1.5 text-[10px] text-zinc-400">({insight.reason})</span>
-                )}
+
+        <div className="grid gap-5 sm:grid-cols-2">
+          {insightGroups.map((group) => (
+            <div key={group.title}>
+              <p className="mb-2 text-[10px] font-semibold uppercase tracking-widest text-zinc-400">
+                {group.title}
+              </p>
+              <div className="space-y-1.5">
+                {group.insights.map((insight) => (
+                  <div key={insight.label} className="flex items-start gap-2">
+                    <ConfidenceDot level={insight.confidence} />
+                    <div className="min-w-0">
+                      <span className="text-xs text-zinc-500">{insight.label}: </span>
+                      <span className={cn(
+                        'text-xs font-medium',
+                        insight.confidence === 'UNKNOWN' ? 'italic text-zinc-400' : 'text-zinc-800',
+                      )}>
+                        {insight.value}
+                      </span>
+                      {insight.reason && insight.confidence === 'MEDIUM' && (
+                        <span className="ml-1 text-[10px] text-zinc-400">({insight.reason})</span>
+                      )}
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           ))}
         </div>
 
-        <div className="mt-3 flex items-center gap-3 border-t border-zinc-100 pt-3">
-          <div className="flex gap-2 text-[10px] text-zinc-400">
-            <span className="flex items-center gap-1"><span className="inline-block w-2 h-2 rounded-full bg-green-500" /> Confirmed</span>
-            <span className="flex items-center gap-1"><span className="inline-block w-2 h-2 rounded-full bg-amber-400" /> Inferred</span>
-            <span className="flex items-center gap-1"><span className="inline-block w-2 h-2 rounded-full bg-zinc-300" /> Unknown</span>
+        {/* Legend + summary */}
+        <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-zinc-100 pt-4">
+          <div className="flex gap-3 text-[10px] text-zinc-400">
+            <span className="flex items-center gap-1.5">
+              <span className="inline-block h-2 w-2 rounded-full bg-green-500" />
+              {confirmed} confirmed
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="inline-block h-2 w-2 rounded-full bg-amber-400" />
+              {inferred} inferred
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="inline-block h-2 w-2 rounded-full bg-zinc-300" />
+              {unknown} unknown
+            </span>
           </div>
+          {gapCount > 0 && (
+            <p className="text-[10px] text-zinc-400">
+              {gapCount} gap{gapCount !== 1 ? 's' : ''} need{gapCount === 1 ? 's' : ''} your input
+            </p>
+          )}
         </div>
       </div>
 
       <div className="flex items-center justify-between">
         <p className="text-sm text-zinc-500">
           {gapCount === 0
-            ? 'Everything is set — ready to generate!'
-            : `${gapCount} quick question${gapCount !== 1 ? 's' : ''} to go →`}
+            ? 'Everything is set — ready to generate your architecture!'
+            : `${gapCount} quick question${gapCount !== 1 ? 's' : ''} left →`}
         </p>
         <button
           type="button"
           onClick={onContinue}
-          className="rounded-lg bg-zinc-900 px-5 py-2.5 text-sm font-semibold text-white hover:bg-zinc-700 transition-colors"
+          className="rounded-lg bg-zinc-900 px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-zinc-700"
         >
-          {gapCount === 0 ? 'Generate prompts →' : 'Answer questions →'}
+          {gapCount === 0 ? 'Generate prompts →' : 'Review gaps and generate →'}
         </button>
       </div>
     </div>
@@ -135,13 +167,12 @@ function QuestionScreen({
         <h1 className="text-xl font-bold text-zinc-900">{question.title}</h1>
         <p className="mt-1 text-sm text-zinc-500">{question.subtitle}</p>
 
-        {/* AI inference badge */}
         {question.inferredValue && (
           <div className="mt-2.5 inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs text-amber-700">
-            <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-400" />
+            <span className="inline-block h-1.5 w-1.5 rounded-full bg-amber-400" />
             AI inferred: <strong>{question.inferredValue}</strong>
             {question.inferredReason && (
-              <span className="text-amber-500 ml-0.5">— {question.inferredReason}</span>
+              <span className="ml-0.5 text-amber-500">— {question.inferredReason}</span>
             )}
           </div>
         )}
@@ -150,7 +181,7 @@ function QuestionScreen({
       {/* options */}
       <div className="mb-6 space-y-2.5">
         {question.options.map((opt) => {
-          const selected = isSelected(opt.value)
+          const selected   = isSelected(opt.value)
           const isInferred = opt.value === question.inferredValue
           return (
             <button
@@ -168,7 +199,9 @@ function QuestionScreen({
               <div className="flex items-center justify-between">
                 <span className="block font-medium leading-snug">{opt.label}</span>
                 {isInferred && !selected && (
-                  <span className="text-[10px] font-medium text-amber-600 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5">AI</span>
+                  <span className="rounded border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-600">
+                    AI pick
+                  </span>
                 )}
               </div>
               <span className={cn('mt-0.5 block text-xs', selected ? 'text-zinc-300' : 'text-zinc-400')}>
@@ -215,22 +248,33 @@ function QuestionScreen({
 // ── Wizard ────────────────────────────────────────────────────────────────────
 
 interface WizardProps {
-  projectId:    string
-  projectName:  string
-  insights:     BRDInsight[]
-  gapQuestions: GapQuestion[]
+  projectId:     string
+  projectName:   string
+  insightGroups: InsightGroup[]
+  gapQuestions:  GapQuestion[]
   filledAnswers: Record<string, string>
+  confirmed:     number
+  inferred:      number
+  unknown:       number
 }
 
-export function Wizard({ projectId, projectName, insights, gapQuestions, filledAnswers }: WizardProps) {
+export function Wizard({
+  projectId,
+  projectName,
+  insightGroups,
+  gapQuestions,
+  filledAnswers,
+  confirmed,
+  inferred,
+  unknown,
+}: WizardProps) {
   const router = useRouter()
 
-  // -1 = insights summary, 0..n-1 = question index
-  const [phase, setPhase]         = useState<'summary' | 'questions'>('summary')
-  const [questionIdx, setQIdx]    = useState(0)
-  const [answers, setAnswers]     = useState<Record<string, string>>({})
+  const [phase, setPhase]           = useState<'summary' | 'questions'>('summary')
+  const [questionIdx, setQIdx]      = useState(0)
+  const [answers, setAnswers]       = useState<Record<string, string>>({})
   const [submitting, setSubmitting] = useState(false)
-  const [error, setError]         = useState('')
+  const [error, setError]           = useState('')
 
   const totalQuestions = gapQuestions.length
   const currentQ       = gapQuestions[questionIdx]
@@ -272,7 +316,7 @@ export function Wizard({ projectId, projectName, insights, gapQuestions, filledA
     setSubmitting(true)
     setError('')
 
-    // Build final payload: BRD-filled answers + user answers (user wins on conflict)
+    // Merge: BRD-filled answers (background) + user answers (explicit choices win)
     const payload: Record<string, string> = { ...filledAnswers }
     for (const q of gapQuestions) {
       payload[q.id] = answers[q.id] ?? q.inferredValue ?? q.defaultValue
@@ -319,8 +363,11 @@ export function Wizard({ projectId, projectName, insights, gapQuestions, filledA
 
       {phase === 'summary' ? (
         <InsightsSummary
-          insights={insights}
+          insightGroups={insightGroups}
           gapCount={totalQuestions}
+          confirmed={confirmed}
+          inferred={inferred}
+          unknown={unknown}
           onContinue={() => {
             if (totalQuestions === 0) {
               void submit()

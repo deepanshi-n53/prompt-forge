@@ -72,8 +72,9 @@ export async function GET(request: NextRequest, { params }: Context) {
               percent: state.percent,
               message: state.message,
               step:    state.step,
-              ...(state.result !== undefined ? { result: state.result } : {}),
-              ...(state.error  !== undefined ? { error:  state.error  } : {}),
+              ...(state.result        !== undefined ? { result:        state.result        } : {}),
+              ...(state.error         !== undefined ? { error:         state.error         } : {}),
+              ...(state.pauseQuestion !== undefined ? { pauseQuestion: state.pauseQuestion } : {}),
             })
             enqueue(`id: ${state.updatedAt}\ndata: ${payload}\n\n`)
           }

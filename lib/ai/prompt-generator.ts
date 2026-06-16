@@ -10,28 +10,46 @@ export interface GeneratedContent {
   assumptions: Assumption[]
 }
 
-function buildSystem(sectionNum: string, sectionName: string): string {
-  return `You are a senior software architect completing section §${sectionNum} — ${sectionName} of a SaaS Architecture Prompt System.
+function buildSystem(
+  sectionNum: string,
+  sectionName: string,
+  lockedDecisions?: Record<string, string>,
+): string {
+  const appName = lockedDecisions?.productPurpose
+    ? lockedDecisions.productPurpose.slice(0, 60)
+    : 'this app'
+  const appType = lockedDecisions?.archetype ?? 'SaaS'
 
-YOUR ONLY JOB:
-Take the section template below and fill in every gap with specific, real answers based on the APP CONTEXT and LOCKED DECISIONS provided.
+  const lockedList = lockedDecisions && Object.keys(lockedDecisions).length > 0
+    ? Object.entries(lockedDecisions)
+        .filter(([, v]) => v)
+        .map(([k, v]) => `  - ${k}: ${v}`)
+        .join('\n')
+    : '  (none yet — this is the first section)'
+
+  return `You are filling in §${sectionNum} — ${sectionName} of the SaaS Architecture Prompt System for ${appName} (${appType}).
+
+LOCKED DECISIONS — never contradict these:
+${lockedList}
 
 RULES:
-1. Output the COMPLETE section text — do not summarise, truncate, or rewrite the structure
-2. Replace every [blank], ___, or [example] with a specific, concrete answer for this app
-3. Every decision in LOCKED DECISIONS is final — reference it, never contradict or redefine it
-4. If a decision is not in LOCKED DECISIONS and you must infer, make a clearly-labeled assumption
-5. Return ONLY valid JSON — no markdown fences, no prose outside the JSON
+1. Fill EVERY ___ field with a specific real answer for THIS app — not a generic example
+2. Use exact app context — if this is a dog-walking app, say "walkers" not "service providers"
+3. Never contradict LOCKED DECISIONS above — they are final and set by earlier sections
+4. Never leave ___ blank — infer the best answer and label it as an assumption if needed
+5. Output ONLY the filled section text — no preamble, no meta-commentary
+6. Return ONLY valid JSON — no markdown fences, no prose outside the JSON
 
 Response format (MUST be valid JSON):
 {
-  "content": "the full completed section text as a single string",
-  "decisions": { "key": "value" },
-  "confidence": 0.0,
-  "assumptions": [{ "field": "name", "value": "value", "confidence": "HIGH|MEDIUM|LOW", "reason": "why" }]
+  "content": "the COMPLETE filled section text as a single string — include ALL headers and sub-sections from the template",
+  "decisions": { "decisionKey": "specificValue" },
+  "confidence": 0.85,
+  "assumptions": [{ "field": "fieldName", "value": "assumed value", "confidence": "HIGH|MEDIUM|LOW", "reason": "why assumed" }]
 }
 
-The "decisions" object must contain ONLY the key decisions this section locks in (for subsequent sections to reference).`
+The "decisions" object must contain only the key decisions this section locks in for subsequent sections.
+The "content" must be the full completed section — do NOT truncate or summarise.`
 }
 
 function safeParse(text: string): GeneratedContent {
@@ -99,23 +117,14 @@ export async function generateSection(
     monetizationModel: parsedBRD.monetizationModel,
   }
 
-  const lockedBlock = lockedDecisions && Object.keys(lockedDecisions).length > 0
-    ? `LOCKED DECISIONS (from previous sections — do not redefine):\n${
-        Object.entries(lockedDecisions)
-          .map(([k, v]) => `  ${k}: ${v}`)
-          .join('\n')
-      }\n\n`
-    : ''
-
   const userMessage = [
     `APP CONTEXT FROM BRD:\n${JSON.stringify(brdContext, null, 2)}`,
     `USER SETUP ANSWERS:\n${JSON.stringify(userAnswers, null, 2)}`,
-    `PROJECT DECISIONS:\n${JSON.stringify(decisions.sections ?? {}, null, 2)}`,
-    `${lockedBlock}SECTION TEMPLATE (§${sectionNum} — ${template.name}):\n${template.template}`,
+    `SECTION TEMPLATE (§${sectionNum} — ${template.name}):\n${template.template}`,
     `AGENT HINT — what to produce in the "content" field:\n${template.agentHint}`,
   ].join('\n\n---\n\n')
 
-  const systemPrompt = buildSystem(sectionNum, template.name)
+  const systemPrompt = buildSystem(sectionNum, template.name, lockedDecisions)
 
   const response = await callAI(
     [

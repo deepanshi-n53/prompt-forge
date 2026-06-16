@@ -10,13 +10,29 @@ export interface APIResponse<T> {
   error?: APIError
 }
 
-export type JobStatus = 'pending' | 'running' | 'complete' | 'failed'
+export type JobStatus = 'pending' | 'running' | 'complete' | 'failed' | 'paused'
+
+export interface PauseOption {
+  value:       string
+  label:       string
+  description: string
+}
+
+export interface PauseQuestion {
+  field:        string
+  sectionNum:   string
+  question:     string
+  subtitle?:    string
+  options:      PauseOption[]
+  defaultValue: string
+}
 
 export interface JobProgress {
-  status: JobStatus
-  percent: number
-  message: string
-  step: string
-  result?: unknown
-  error?: string
+  status:         JobStatus
+  percent:        number
+  message:        string
+  step:           string
+  result?:        unknown
+  error?:         string
+  pauseQuestion?: PauseQuestion
 }

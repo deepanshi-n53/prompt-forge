@@ -168,15 +168,25 @@ export const generatePromptsJob = inngest.createFunction(
 
     // Seed locked decisions from BRD + user answers
     const lockedDecisions: Record<string, string> = {
+      // From BRD
       productPurpose:    parsedBRD.productPurpose    ?? '',
       archetype:         parsedBRD.archetype         ?? '',
       platform:          parsedBRD.platform          ?? 'web',
+      userTypes:         (parsedBRD.userTypes ?? []).slice(0, 5).join(', '),
+      coreFeatures:      (parsedBRD.coreFeatures ?? []).filter(f => f.priority === 'MUST').slice(0, 6).map(f => f.name).join(', '),
+      integrations:      (parsedBRD.integrationHints ?? []).join(', '),
       monetizationModel: parsedBRD.monetizationModel ?? '',
+      // From user wizard answers
       billingModel:      userAnswers.q1 ?? 'Monthly subscription',
       launchRegion:      userAnswers.q2 ?? 'Single country',
       timeline:          userAnswers.q3 ?? '3-6 months',
       sensitiveData:     userAnswers.q4 ?? 'None',
       userScale:         userAnswers.q5 ?? '1,000-10,000',
+      deploymentTarget:  userAnswers.q6 ?? 'Railway',
+      multiTenant:       userAnswers.q7 ?? 'No',
+      authMethod:        userAnswers.q8 ?? 'Email + social',
+      dbPreference:      userAnswers.q9 ?? 'PostgreSQL',
+      mfaPolicy:         userAnswers.q10 ?? 'Optional for users',
       track,
     }
 
@@ -187,6 +197,100 @@ export const generatePromptsJob = inngest.createFunction(
     for (const sectionNum of orderedNums) {
       const tmpl = allTemplates.find(t => t.num === sectionNum)
       if (!tmpl) continue
+
+      // ── Mid-generation pause checkpoints ─────────────────────────────────────
+
+      // Before §09 (Real-time): ask if not answered and not obvious from BRD
+      if (sectionNum === '09' && !lockedDecisions['realtimeNeeded']) {
+        await setJobState(projectId, {
+          status:  'paused',
+          percent: 15 + Math.round((completedIdx / totalSections) * 75),
+          step:    'pause-realtime',
+          message: 'One quick question before §09 Real-time…',
+          pauseQuestion: {
+            field:        'realtimeNeeded',
+            sectionNum:   '09',
+            question:     'Does your app need real-time updates?',
+            subtitle:     'Shapes §09 Real-time & Live Data — websockets, SSE, or polling strategy',
+            options: [
+              { value: 'yes', label: 'Yes — live updates', description: 'Chat, notifications, live dashboards, real-time feeds' },
+              { value: 'no',  label: 'No — standard refresh', description: 'Page reloads and periodic polling are fine' },
+            ],
+            defaultValue: 'no',
+          },
+        })
+
+        const realtimeEvent = await step.waitForEvent('wait-realtime-answer', {
+          event:   'brd/pause-answered',
+          timeout: '5m',
+          if:      `async.data.projectId == "${projectId}" && async.data.field == "realtimeNeeded"`,
+        })
+        lockedDecisions['realtimeNeeded'] = (realtimeEvent?.data as Record<string,string> | null)?.answer ?? 'no'
+      }
+
+      // Before §20 (Compliance): confirm sensitive data handling
+      if (sectionNum === '20') {
+        const alreadyKnown = lockedDecisions['sensitiveData'] !== 'None' && lockedDecisions['sensitiveData']
+        if (!alreadyKnown || lockedDecisions['sensitiveData'] === 'Unknown') {
+          await setJobState(projectId, {
+            status:  'paused',
+            percent: 15 + Math.round((completedIdx / totalSections) * 75),
+            step:    'pause-compliance',
+            message: 'One quick compliance question before §20…',
+            pauseQuestion: {
+              field:        'complianceConfirmed',
+              sectionNum:   '20',
+              question:     'Confirm: your app does NOT handle human health data, correct?',
+              subtitle:     'This is critical — HIPAA compliance changes the entire §20 architecture',
+              options: [
+                { value: 'confirmed-no-health',    label: 'Correct — no health data',       description: 'Standard privacy rules apply — no HIPAA needed' },
+                { value: 'actually-yes-health',    label: 'Wait — we do handle health data', description: 'Enable full HIPAA-compliant security architecture' },
+              ],
+              defaultValue: 'confirmed-no-health',
+            },
+          })
+
+          const complianceEvent = await step.waitForEvent('wait-compliance-answer', {
+            event:   'brd/pause-answered',
+            timeout: '5m',
+            if:      `async.data.projectId == "${projectId}" && async.data.field == "complianceConfirmed"`,
+          })
+          const complianceAnswer = (complianceEvent?.data as Record<string,string> | null)?.answer ?? 'confirmed-no-health'
+          if (complianceAnswer === 'actually-yes-health') {
+            lockedDecisions['sensitiveData']  = 'Health/medical'
+            lockedDecisions['hipaaRequired']  = 'yes'
+          }
+          lockedDecisions['complianceConfirmed'] = 'yes'
+        }
+      }
+
+      // Before §31 (i18n): ask about multi-language support
+      if (sectionNum === '31' && !lockedDecisions['multiLanguage']) {
+        await setJobState(projectId, {
+          status:  'paused',
+          percent: 15 + Math.round((completedIdx / totalSections) * 75),
+          step:    'pause-i18n',
+          message: 'One quick question before §31 Internationalisation…',
+          pauseQuestion: {
+            field:        'multiLanguage',
+            sectionNum:   '31',
+            question:     'Will your app support multiple languages?',
+            subtitle:     'Shapes §31 i18n architecture — locale files, RTL support, date/currency formatting',
+            options: [
+              { value: 'no',  label: 'English only',          description: 'Single language — simpler architecture' },
+              { value: 'yes', label: 'Multiple languages',    description: 'Full i18n with locale files and RTL support if needed' },
+            ],
+            defaultValue: 'no',
+          },
+        })
+
+        const i18nEvent = await step.waitForEvent('wait-i18n-answer', {
+          event:   'brd/pause-answered',
+          timeout: '5m',
+          if:      `async.data.projectId == "${projectId}" && async.data.field == "multiLanguage"`,
+        })
+        lockedDecisions['multiLanguage'] = (i18nEvent?.data as Record<string,string> | null)?.answer ?? 'no'
+      }
 
       // Capture current snapshot — Inngest callbacks don't re-run on replay,
       // so we pass lockedDecisions BY VALUE (spread) at the time this step queues.

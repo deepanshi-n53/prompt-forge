@@ -2,19 +2,30 @@ import type { ParsedBRD } from '@/types/brd'
 import type { SectionDecision } from '@/types/decision'
 
 export type UserAnswers = {
-  q1?: string  // billing model
-  q2?: string  // launch region
-  q3?: string  // timeline → track
-  q4?: string  // sensitive data (comma-separated or 'None')
-  q5?: string  // year-1 user count
+  q1?:  string  // billing model
+  q2?:  string  // launch region
+  q3?:  string  // timeline → track
+  q4?:  string  // sensitive data (comma-separated or 'None')
+  q5?:  string  // year-1 user count
+  q6?:  string  // deployment target
+  q7?:  string  // multi-tenant
+  q8?:  string  // auth method
+  q9?:  string  // db preference
+  q10?: string  // MFA policy
+  [key: string]: string | undefined  // mid-gen pause answers
 }
 
-export const ANSWER_DEFAULTS: Required<UserAnswers> = {
-  q1: 'Monthly subscription',
-  q2: 'Single country — GDPR flagged as assumption',
-  q3: '3-6 months',
-  q4: 'None',
-  q5: '1,000-10,000',
+export const ANSWER_DEFAULTS: Record<string, string> = {
+  q1:  'Monthly subscription',
+  q2:  'Single country — GDPR flagged as assumption',
+  q3:  '3-6 months',
+  q4:  'None',
+  q5:  '1,000-10,000',
+  q6:  'Railway',
+  q7:  'No',
+  q8:  'Email + social',
+  q9:  'PostgreSQL',
+  q10: 'Optional for users',
 }
 
 export function trackFromTimeline(q3: string): 'FAST' | 'FULL' {
@@ -54,10 +65,10 @@ export function buildDecisionGraph(
   userAnswers: UserAnswers,
 ): { sections: Record<string, SectionDecision>; track: 'FAST' | 'FULL' } {
   // User answers win; fill blanks with defaults
-  const a: Required<UserAnswers> = {
+  const a: Record<string, string> = {
     ...ANSWER_DEFAULTS,
     ...Object.fromEntries(
-      Object.entries(userAnswers).filter(([, v]) => v != null && v !== ''),
+      Object.entries(userAnswers).filter(([, v]) => v != null && v !== '') as [string, string][],
     ),
   }
 
@@ -69,6 +80,34 @@ export function buildDecisionGraph(
   const brdBase = parsedBRD.extractedDecisions ?? {}
 
   const sections: Record<string, SectionDecision> = {
+    '§05': {
+      sectionNum:  '§05',
+      sectionName: 'High-Level Architecture',
+      completedAt: now,
+      decisions: {
+        deployment_target: a.q6,
+        multi_tenant:      a.q7,
+        architecture_style: a.q7 === 'Yes — B2B multi-tenant' ? 'modular-monolith-multitenant' : 'modular-monolith',
+      },
+      downstreamDependencies: ['§07', '§09', '§23', '§24'],
+      confidence: 0.85,
+      assumptions: [],
+    },
+
+    '§06': {
+      sectionNum:  '§06',
+      sectionName: 'Authentication & Authorization',
+      completedAt: now,
+      decisions: {
+        auth_method:       a.q8,
+        mfa_policy:        a.q10,
+        db_preference:     a.q9,
+      },
+      downstreamDependencies: ['§09', '§18'],
+      confidence: 0.9,
+      assumptions: [],
+    },
+
     '§03': {
       sectionNum:  '§03',
       sectionName: 'Non-Functional Requirements',

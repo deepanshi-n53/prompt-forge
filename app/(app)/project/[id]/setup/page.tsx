@@ -36,9 +36,12 @@ export default async function SetupPage({
     <Wizard
       projectId={id}
       projectName={project.name}
-      insights={wizardSetup.insights}
+      insightGroups={wizardSetup.insightGroups}
       gapQuestions={wizardSetup.gapQuestions}
       filledAnswers={wizardSetup.filledAnswers}
+      confirmed={wizardSetup.confirmed}
+      inferred={wizardSetup.inferred}
+      unknown={wizardSetup.unknown}
     />
   )
 }

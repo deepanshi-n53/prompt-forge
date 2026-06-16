@@ -1,5 +1,7 @@
 import { Redis } from '@upstash/redis'
-import type { JobProgress } from '@/types/api'
+import type { JobProgress, PauseQuestion } from '@/types/api'
+
+export type { PauseQuestion }
 
 const JOB_TTL_SECONDS = 3600 // 1 hour
 
