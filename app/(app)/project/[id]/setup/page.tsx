@@ -1,7 +1,9 @@
 import { notFound, redirect } from 'next/navigation'
 import { db } from '@/lib/db/prisma'
 import { requireAuth } from '@/lib/auth'
+import { buildWizardSetup } from '@/lib/ai/gap-analyzer'
 import { Wizard } from './_components/Wizard'
+import type { ParsedBRD } from '@/types/brd'
 
 export default async function SetupPage({
   params,
@@ -13,12 +15,30 @@ export default async function SetupPage({
 
   const project = await db.project.findFirst({
     where: { id, ownerId: user.id },
+    include: {
+      brds: {
+        where:   { isActive: true },
+        orderBy: { version: 'desc' },
+        take:    1,
+        select:  { parsedContent: true },
+      },
+    },
   })
 
   if (!project) notFound()
 
-  // Already generated — skip straight to prompts
   if (project.status === 'READY') redirect(`/project/${id}/prompts`)
 
-  return <Wizard projectId={id} projectName={project.name} />
+  const parsedBRD = (project.brds[0]?.parsedContent ?? null) as ParsedBRD | null
+  const wizardSetup = buildWizardSetup(parsedBRD)
+
+  return (
+    <Wizard
+      projectId={id}
+      projectName={project.name}
+      insights={wizardSetup.insights}
+      gapQuestions={wizardSetup.gapQuestions}
+      filledAnswers={wizardSetup.filledAnswers}
+    />
+  )
 }
