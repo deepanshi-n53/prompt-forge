@@ -175,7 +175,7 @@ export default async function ProjectPage({
 
                 {/* ── PARSED: prominent next-step card ── */}
                 {project.status === 'PARSED' && (
-                  <div className="rounded-xl border border-indigo-200 bg-gradient-to-br from-indigo-50 to-violet-50 p-6">
+                  <div className="rounded-xl border border-indigo-200 bg-linear-to-br from-indigo-50 to-violet-50 p-6">
                     <div className="flex items-start gap-4">
                       <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-indigo-100 text-indigo-600 text-lg">
                         ✓
@@ -259,7 +259,7 @@ export default async function ProjectPage({
                     </div>
                   </div>
                   <Link
-                    href={`/project/${project.id}/prompts/${p.id}`}
+                    href={`/project/${project.id}/prompts`}
                     className={cn(buttonVariants({ variant: 'outline', size: 'sm' }))}
                   >
                     View
