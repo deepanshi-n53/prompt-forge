@@ -37,8 +37,18 @@ function safeParse(text: string): GeneratedContent {
     .replace(/\s*```\s*$/, '')
     .trim()
   const raw = JSON.parse(stripped) as Record<string, unknown>
+  let content: string
+  if (typeof raw.content === 'string') {
+    content = raw.content
+  } else if (raw.content !== null && raw.content !== undefined) {
+    // AI returned an object/array instead of a string — serialize it so the
+    // stored value is at least readable rather than "[object Object]"
+    content = JSON.stringify(raw.content, null, 2)
+  } else {
+    content = ''
+  }
   return {
-    content:     typeof raw.content === 'string' ? raw.content : String(raw.content ?? ''),
+    content,
     confidence:  typeof raw.confidence === 'number' ? Math.max(0, Math.min(1, raw.confidence)) : 0.7,
     assumptions: Array.isArray(raw.assumptions) ? (raw.assumptions as Assumption[]) : [],
   }

@@ -29,7 +29,7 @@ export async function POST(request: NextRequest) {
         const email = data.email_addresses[0]?.email_address ?? ''
         const name = [data.first_name, data.last_name].filter(Boolean).join(' ') || null
 
-        // @n53tech.com employees get Professional access for free
+        // @n53tech.com employees get Enterprise access for free
         const isN53 = email.toLowerCase().endsWith('@n53tech.com')
 
         await db.user.create({
@@ -39,7 +39,7 @@ export async function POST(request: NextRequest) {
             name,
             avatarUrl: data.image_url ?? null,
             isNewUser: !isN53,           // skip onboarding wizard for internal team
-            plan:      isN53 ? 'PROFESSIONAL' : 'FREE',
+            plan:      isN53 ? 'ENTERPRISE' : 'FREE',
           },
         })
 
