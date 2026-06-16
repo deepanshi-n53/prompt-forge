@@ -44,7 +44,7 @@ export async function POST(request: NextRequest, { params }: Context) {
 
   const parsed = answersSchema.safeParse(body)
   if (!parsed.success) {
-    return NextResponse.json({ error: parsed.error.flatten() }, { status: 422 })
+    return NextResponse.json({ error: parsed.error.issues.map((i) => i.message).join('; ') }, { status: 422 })
   }
 
   const userAnswers = parsed.data
@@ -78,17 +78,21 @@ export async function POST(request: NextRequest, { params }: Context) {
     },
   })
 
-  // Fire the generate-prompts pipeline
-  await inngest.send({
-    name: 'brd/answered',
-    data: {
-      projectId: id,
-      brdId: activeBrd?.id ?? '',
-      decisionGraphId: decisionGraph.id,
-      track: newTrack,
-      userAnswers,
-    },
-  })
+  // Fire the generate-prompts pipeline (non-blocking — log errors but don't fail the request)
+  try {
+    await inngest.send({
+      name: 'brd/answered',
+      data: {
+        projectId: id,
+        brdId: activeBrd?.id ?? '',
+        decisionGraphId: decisionGraph.id,
+        track: newTrack,
+        userAnswers,
+      },
+    })
+  } catch (err) {
+    console.error('[answers] inngest.send failed — user navigated to /generating, job may not start', err)
+  }
 
   return NextResponse.json({ jobId: id, track: newTrack })
 }

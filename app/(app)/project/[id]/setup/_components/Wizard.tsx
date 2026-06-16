@@ -158,24 +158,37 @@ export function Wizard({ projectId, projectName }: WizardProps) {
       payload[question.id] = answers[question.id] ?? question.defaultValue
     }
 
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 15_000)
+
     try {
       const res = await fetch(`/api/projects/${projectId}/answers`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
+        signal: controller.signal,
       })
+      clearTimeout(timeout)
 
-      const data = (await res.json()) as { jobId?: string; error?: string }
+      let data: { jobId?: string; error?: unknown } = {}
+      try { data = await res.json() } catch { /* non-JSON body — ignore */ }
 
       if (!res.ok) {
-        setError(data.error ?? 'Failed to save answers.')
+        const msg = typeof data.error === 'string'
+          ? data.error
+          : `Server error (${res.status}) — please try again.`
+        setError(msg)
         setSubmitting(false)
         return
       }
 
-      router.push(`/project/${projectId}/generating?jobId=${data.jobId ?? projectId}`)
-    } catch {
-      setError('Network error — please try again.')
+      router.push(`/project/${projectId}/generating?jobId=${(data.jobId as string | undefined) ?? projectId}`)
+    } catch (err) {
+      clearTimeout(timeout)
+      const isTimeout = err instanceof Error && err.name === 'AbortError'
+      setError(isTimeout
+        ? 'Request timed out — please try again.'
+        : 'Network error — please try again.')
       setSubmitting(false)
     }
   }
