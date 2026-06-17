@@ -150,17 +150,18 @@ function QuestionField({
     )
   }
 
-  // select / multiselect → option buttons
+  // select / multiselect → option buttons. The clean enum `value` is stored; the
+  // descriptive `label` is shown (the parser only accepts exact enum values).
   if ((question.inputType === 'select' || question.inputType === 'multiselect') && question.options) {
     const multi = question.inputType === 'multiselect'
     const selected = value.split(',').map((s) => s.trim()).filter(Boolean)
-    const isSelected = (opt: string) => (multi ? selected.includes(opt) : value === opt)
+    const isSelected = (val: string) => (multi ? selected.includes(val) : value === val)
 
-    function pick(opt: string) {
-      if (!multi) { onChange(opt); return }
-      const next = selected.includes(opt)
-        ? selected.filter((s) => s !== opt)
-        : [...selected, opt]
+    function pick(val: string) {
+      if (!multi) { onChange(val); return }
+      const next = selected.includes(val)
+        ? selected.filter((s) => s !== val)
+        : [...selected, val]
       onChange(next.join(','))
     }
 
@@ -168,17 +169,17 @@ function QuestionField({
       <div className="flex flex-wrap gap-2">
         {question.options.map((opt) => (
           <button
-            key={opt}
+            key={opt.value}
             type="button"
-            onClick={() => pick(opt)}
+            onClick={() => pick(opt.value)}
             className={cn(
               'rounded-lg border px-3 py-1.5 text-sm font-medium transition-all',
-              isSelected(opt)
+              isSelected(opt.value)
                 ? 'border-zinc-900 bg-zinc-900 text-white'
                 : 'border-zinc-200 bg-white text-zinc-700 hover:border-zinc-400',
             )}
           >
-            {opt}
+            {opt.label}
           </button>
         ))}
       </div>

@@ -1,19 +1,28 @@
 import type { ArchitectureDecisions } from '@/types/brd'
+import type { PauseOption, PauseQuestion, PauseSubQuestion } from '@/types/api'
 
 // ── Public interfaces ─────────────────────────────────────────────────────────
 
 export type GapInputType = 'text' | 'select' | 'multiselect' | 'boolean'
 
-// A question is generated ONLY for a field the BRD did not confidently answer.
+// An option whose stored value (a clean enum / array token) is separate from the
+// human-friendly label shown in the wizard. value is what gets persisted, so it
+// MUST match the enum the parser accepts (see brd-parser ENUM_FIELDS).
+export interface GapOption {
+  value: string
+  label: string
+}
+
+// A question generated for a field the BRD did not confidently answer.
 export interface GapQuestion {
   field:           string             // ArchitectureDecisions field name
-  group:           string             // Foundation | Architecture | Auth & Security | Integrations | Compliance
+  group:           string             // Foundation | Architecture | Auth & Security | Database | API | Integrations
   question:        string             // conversational prompt shown to the user
   aiGuess:         string | null      // what the parser inferred, or null if nothing
-  preFilledAnswer: string | null      // inferred value (wizard input format) pre-selected when 0.5 ≤ conf < 0.7
-  confidence:      number             // current confidence (0.0–0.69)
+  preFilledAnswer: string | null      // inferred value (wizard input format) pre-selected
+  confidence:      number             // current confidence (0.0–0.99)
   inputType:       GapInputType
-  options:         string[] | null    // for select / multiselect
+  options:         GapOption[] | null // for select / multiselect
 }
 
 export interface BRDInsight {
@@ -28,74 +37,17 @@ export interface InsightGroup {
   insights: BRDInsight[]
 }
 
-// ── Tunables ──────────────────────────────────────────────────────────────────
-
-// ≥ 0.7  → the BRD answered it; never ask.
-// 0.5–0.7 → inferred; show as a PRE-FILLED answer the user confirms or changes.
-// < 0.5  → genuine gap; ask as a blank question.
-const CONFIDENCE_THRESHOLD = 0.7
-const INFER_THRESHOLD      = 0.5
-const MAX_QUESTIONS = 12
-
-// The Foundation group is skipped entirely when every one of these is at least
-// inferred — most BRDs describe what the app does, so these should rarely be asked.
-const FOUNDATION_FIELDS = ['appName', 'appType', 'platform', 'userTypes', 'coreFeatures'] as const
-
-// Critical fields in PRIORITY order. Earlier entries survive the 12-question cap.
-interface FieldMeta {
-  field:     keyof ArchitectureDecisions
-  group:     string
-  question:  string
-  inputType: GapInputType
-  options:   string[] | null
-}
-
-const CRITICAL_FIELDS: FieldMeta[] = [
-  // ── Foundation ──────────────────────────────────────────────────────────────
-  { field: 'appName',  group: 'Foundation', question: 'What is your app called?', inputType: 'text', options: null },
-  { field: 'appType',  group: 'Foundation', question: 'What type of product is this?', inputType: 'select',
-    options: ['marketplace', 'b2b-saas', 'consumer', 'ecommerce', 'ai-tool', 'productivity', 'social', 'booking', 'fintech', 'healthtech'] },
-  { field: 'platform', group: 'Foundation', question: 'Which platforms will it run on?', inputType: 'select',
-    options: ['web', 'mobile', 'both'] },
-  { field: 'userTypes',    group: 'Foundation', question: 'Who are the main types of users? (comma-separated)', inputType: 'text', options: null },
-  { field: 'coreFeatures', group: 'Foundation', question: 'What are the core features? (comma-separated)', inputType: 'text', options: null },
-
-  // ── Architecture ────────────────────────────────────────────────────────────
-  { field: 'multiTenant',     group: 'Architecture', question: 'Will multiple separate organizations use this as isolated workspaces?', inputType: 'boolean', options: null },
-  { field: 'tenancyModel',    group: 'Architecture', question: 'How should each tenant’s data be isolated?', inputType: 'select',
-    options: ['row-level', 'schema-per-tenant', 'database-per-tenant'] },
-  { field: 'deploymentModel', group: 'Architecture', question: 'What backend architecture do you prefer?', inputType: 'select',
-    options: ['monolith', 'modular-monolith', 'microservices'] },
-  { field: 'needsRealtime',   group: 'Architecture', question: 'Does your app need real-time features like live chat, live tracking, or live notifications?', inputType: 'boolean', options: null },
-  { field: 'needsFileStorage', group: 'Architecture', question: 'Will users upload files, images, or documents?', inputType: 'boolean', options: null },
-
-  // ── Auth & Security ─────────────────────────────────────────────────────────
-  { field: 'authMethod',  group: 'Auth & Security', question: 'How should users stay authenticated?', inputType: 'select',
-    options: ['JWT', 'sessions', 'opaque-tokens'] },
-  { field: 'mfaRequired', group: 'Auth & Security', question: 'Do users need multi-factor authentication (MFA)?', inputType: 'boolean', options: null },
-  { field: 'rbacRoles',   group: 'Auth & Security', question: 'What user roles need different permission levels? (comma-separated)', inputType: 'text', options: null },
-
-  // ── Integrations ────────────────────────────────────────────────────────────
-  { field: 'paymentProvider', group: 'Integrations', question: 'Will your app process payments? If so, which provider?', inputType: 'select',
-    options: ['Stripe', 'Razorpay', 'PayPal', 'none'] },
-  { field: 'emailProvider',   group: 'Integrations', question: 'Which service will send your transactional emails?', inputType: 'text', options: null },
-
-  // ── Compliance ──────────────────────────────────────────────────────────────
-  { field: 'gdprRequired',  group: 'Compliance', question: 'Will you serve users in the EU (requiring GDPR compliance)?', inputType: 'boolean', options: null },
-  { field: 'hipaaRequired', group: 'Compliance', question: 'Will your app handle health or medical data (requiring HIPAA)?', inputType: 'boolean', options: null },
-  { field: 'pciRequired',   group: 'Compliance', question: 'Will you store raw credit-card data (requiring PCI-DSS)?', inputType: 'boolean', options: null },
-  { field: 'launchRegions', group: 'Compliance', question: 'Which countries or regions are you launching in? (comma-separated)', inputType: 'text', options: null },
-]
-
 // ── Value & confidence helpers ────────────────────────────────────────────────
 
 const ARRAY_DEFAULT_CONF = 0.8 // a non-empty extracted array counts as answered
 
+// The parser only writes confidence entries for non-array fields, so for arrays we
+// fall back to presence. This is why setup gating uses this, not raw confidence —
+// otherwise a fully-populated coreFeatures/userTypes would always be re-asked.
 function effectiveConfidence(field: keyof ArchitectureDecisions, d: ArchitectureDecisions): number {
   const explicit = d.confidence[field as string]
   if (typeof explicit === 'number') return explicit
 
-  // Fall back to value presence when the parser omitted a confidence entry.
   const value = d[field]
   if (Array.isArray(value)) return value.length > 0 ? ARRAY_DEFAULT_CONF : 0
   if (value == null) return 0
@@ -118,7 +70,7 @@ function aiGuessFor(field: keyof ArchitectureDecisions, d: ArchitectureDecisions
   return displayValue(field, d)
 }
 
-// The inferred value in the EXACT format the wizard's inputs expect, so it can be
+// The inferred value in the EXACT format the wizard inputs expect, so it can be
 // pre-selected: boolean → 'true'/'false', arrays → comma-joined, else the raw value.
 function answerValueFor(field: keyof ArchitectureDecisions, d: ArchitectureDecisions): string | null {
   const v = d[field]
@@ -128,42 +80,285 @@ function answerValueFor(field: keyof ArchitectureDecisions, d: ArchitectureDecis
   return String(v)
 }
 
-// ── Gap detection ─────────────────────────────────────────────────────────────
+// ── SETUP QUESTIONS (Group A — asked before generation starts) ─────────────────
+// Fields owned or depended on by §01–§08. They are locked for every later section,
+// so a blank here makes early sections generic. There is NO cap: every field below
+// its threshold becomes a question. A detailed BRD → few/none; a vague BRD → many.
 
-// Returns questions ONLY for fields whose confidence is below the threshold,
-// ordered by criticalness and capped at MAX_QUESTIONS.
-export function analyzeGaps(decisions: ArchitectureDecisions): GapQuestion[] {
-  const gaps: GapQuestion[] = []
+const opt = (value: string, label?: string): GapOption => ({ value, label: label ?? value })
 
-  // Skip the whole Foundation group when every foundation field is at least
-  // inferred — the BRD clearly describes the product, so don't re-ask it.
-  const skipFoundation = FOUNDATION_FIELDS.every(
-    (f) => effectiveConfidence(f as keyof ArchitectureDecisions, decisions) >= INFER_THRESHOLD,
-  )
+interface SetupFieldMeta {
+  field:          keyof ArchitectureDecisions
+  group:          string
+  threshold:      number
+  question:       string
+  inputType:      GapInputType
+  options:        GapOption[] | null
+  conditionalOn?: (d: ArchitectureDecisions) => boolean
+}
 
-  for (const meta of CRITICAL_FIELDS) {
+// Payments are only worth asking about when the product clearly involves them.
+function featuresImplyPayments(d: ArchitectureDecisions): boolean {
+  if (['marketplace', 'ecommerce', 'fintech', 'booking'].includes(d.appType ?? '')) return true
+  const text = [...d.coreFeatures, ...d.coreUserJourneys].join(' ').toLowerCase()
+  return /pay|payment|checkout|subscrib|billing|purchase|\bbuy\b|\bsell\b|order|invoice|wallet|transaction/.test(text)
+}
+
+const SETUP_FIELDS: SetupFieldMeta[] = [
+  // ── Foundation (needed by §01) ──────────────────────────────────────────────
+  { field: 'appName', group: 'Foundation', threshold: 0.8,
+    question: 'What is your app called?', inputType: 'text', options: null },
+  { field: 'appType', group: 'Foundation', threshold: 0.7,
+    question: 'What type of product is this?', inputType: 'select',
+    options: ['marketplace','b2b-saas','consumer','ecommerce','ai-tool','productivity','social','booking','fintech','healthtech'].map((v) => opt(v)) },
+  { field: 'platform', group: 'Foundation', threshold: 0.7,
+    question: 'Which platforms will it run on?', inputType: 'select',
+    options: ['web','mobile','both'].map((v) => opt(v)) },
+  { field: 'userTypes', group: 'Foundation', threshold: 0.6,
+    question: 'Who are the main types of users? (e.g. admin, customer, vendor)', inputType: 'text', options: null },
+  { field: 'coreFeatures', group: 'Foundation', threshold: 0.5,
+    question: 'What are the core features of your app? (comma-separated)', inputType: 'text', options: null },
+  { field: 'track', group: 'Foundation', threshold: 0.6,
+    question: 'Is this a quick MVP or a full production build?', inputType: 'select',
+    options: [opt('FAST', 'FAST — MVP in weeks'), opt('FULL', 'FULL — Production with all sections')] },
+
+  // ── Architecture (needed by §05) ──────────────────────────────────────────────
+  { field: 'multiTenant', group: 'Architecture', threshold: 0.6,
+    question: 'Will multiple separate organisations each have their own isolated workspace? (e.g. Slack — each company is a tenant)',
+    inputType: 'boolean', options: null },
+  { field: 'tenancyModel', group: 'Architecture', threshold: 0.6,
+    question: "How should each tenant's data be isolated?", inputType: 'select',
+    options: [
+      opt('row-level', 'row-level — shared DB, filter by tenantId (simplest)'),
+      opt('schema-per-tenant', 'schema-per-tenant — separate DB schema per tenant'),
+      opt('database-per-tenant', 'database-per-tenant — fully separate DB per tenant (most isolated)'),
+    ],
+    conditionalOn: (d) => d.multiTenant === true },
+  { field: 'deploymentModel', group: 'Architecture', threshold: 0.5,
+    question: 'What backend architecture do you prefer?', inputType: 'select',
+    options: [
+      opt('modular-monolith', 'modular-monolith — one codebase, separate modules (recommended)'),
+      opt('microservices', 'microservices — separate services per domain'),
+      opt('monolith', 'monolith — single simple codebase'),
+    ] },
+  { field: 'cloudProvider', group: 'Architecture', threshold: 0.5,
+    question: 'Which cloud provider will you deploy to?', inputType: 'select',
+    options: ['Railway','Vercel','AWS','GCP','Azure'].map((v) => opt(v)) },
+
+  // ── Auth & Security (needed by §06) ───────────────────────────────────────────
+  { field: 'authMethod', group: 'Auth & Security', threshold: 0.6,
+    question: 'How should users authenticate? How should sessions be managed?', inputType: 'select',
+    options: [
+      opt('JWT', 'JWT — stateless tokens (recommended for APIs)'),
+      opt('sessions', 'sessions — server-side sessions'),
+      opt('opaque-tokens', 'opaque-tokens — database-backed tokens'),
+    ] },
+  { field: 'socialProviders', group: 'Auth & Security', threshold: 0.5,
+    question: 'Which social login options do you need? (select all that apply)', inputType: 'multiselect',
+    options: [opt('Google'), opt('GitHub'), opt('Facebook'), opt('Apple'), opt('None', 'None — email/password only')] },
+  { field: 'mfaRequired', group: 'Auth & Security', threshold: 0.5,
+    question: 'Do users need multi-factor authentication (MFA)?', inputType: 'boolean', options: null },
+  { field: 'rbacRoles', group: 'Auth & Security', threshold: 0.5,
+    question: 'What user roles need different permission levels? (e.g. admin, editor, viewer)', inputType: 'text', options: null },
+
+  // ── Database (needed by §07) ──────────────────────────────────────────────────
+  { field: 'dbEngine', group: 'Database', threshold: 0.6,
+    question: 'Which database engine will you use?', inputType: 'select',
+    options: [opt('PostgreSQL', 'PostgreSQL (recommended)'), opt('MySQL'), opt('MongoDB'), opt('SQLite')] },
+  { field: 'cacheLayer', group: 'Database', threshold: 0.5,
+    question: 'Do you need a cache layer for performance?', inputType: 'select',
+    options: [opt('Redis', 'Redis (recommended)'), opt('Memcached'), opt('none', 'None')] },
+  { field: 'searchEngine', group: 'Database', threshold: 0.5,
+    question: 'Do you need full-text search?', inputType: 'select',
+    options: [
+      opt('pg-fulltext', 'pg-fulltext — built into PostgreSQL (simplest)'),
+      opt('Elasticsearch', 'Elasticsearch — dedicated search engine'),
+      opt('Algolia', 'Algolia — hosted search service'),
+      opt('none', 'None'),
+    ] },
+
+  // ── API (needed by §08) ───────────────────────────────────────────────────────
+  { field: 'apiStyle', group: 'API', threshold: 0.6,
+    question: 'What API style will you use?', inputType: 'select',
+    options: [opt('REST', 'REST (recommended)'), opt('GraphQL'), opt('tRPC', 'tRPC — TypeScript end-to-end')] },
+  { field: 'needsPublicAPI', group: 'API', threshold: 0.5,
+    question: 'Will you expose a public API for third-party developers?', inputType: 'boolean', options: null },
+
+  // ── Integrations (needed by §12) ──────────────────────────────────────────────
+  { field: 'paymentProvider', group: 'Integrations', threshold: 0.5,
+    question: 'Which payment provider will you use?', inputType: 'select',
+    options: [opt('Stripe'), opt('Razorpay'), opt('PayPal'), opt('none', 'None — no payments needed')],
+    conditionalOn: featuresImplyPayments },
+  { field: 'emailProvider', group: 'Integrations', threshold: 0.4,
+    question: 'Which service will send transactional emails (welcome, password reset, notifications)?', inputType: 'select',
+    options: [opt('Resend', 'Resend (recommended)'), opt('SendGrid'), opt('Postmark'), opt('Nodemailer/SMTP')] },
+]
+
+// Returns a question for EVERY setup field below its confidence threshold — no cap.
+export function getSetupQuestions(decisions: ArchitectureDecisions): GapQuestion[] {
+  const out: GapQuestion[] = []
+
+  for (const meta of SETUP_FIELDS) {
     const conf = effectiveConfidence(meta.field, decisions)
-    if (conf >= CONFIDENCE_THRESHOLD) continue                    // BRD already answered this
-    if (meta.group === 'Foundation' && skipFoundation) continue   // whole group inferred
+    if (conf >= meta.threshold) continue                              // BRD answered it
+    if (meta.conditionalOn && !meta.conditionalOn(decisions)) continue // not applicable
 
-    // 0.5–0.7 → pre-fill the inferred value so the user just confirms; < 0.5 → blank.
-    const inferred = conf >= INFER_THRESHOLD ? answerValueFor(meta.field, decisions) : null
-
-    gaps.push({
+    out.push({
       field:           meta.field as string,
       group:           meta.group,
       question:        meta.question,
-      aiGuess:         aiGuessFor(meta.field, decisions),
-      preFilledAnswer: inferred,
-      confidence:      Math.min(Math.round(conf * 100) / 100, 0.69),
+      aiGuess:         conf > 0 ? aiGuessFor(meta.field, decisions) : null,
+      preFilledAnswer: conf > 0 ? answerValueFor(meta.field, decisions) : null,
+      confidence:      Math.min(Math.round(conf * 100) / 100, 0.99),
       inputType:       meta.inputType,
       options:         meta.options,
     })
-
-    if (gaps.length >= MAX_QUESTIONS) break
   }
 
-  return gaps
+  return out
+}
+
+// ── MID-GEN QUESTIONS (Group B — asked one section at a time, mid-generation) ──
+// These only affect one specific section, so they're asked right before that
+// section runs rather than up front. Booleans render as Yes/No selects (the pause
+// modal has no native boolean input). Driven entirely by what's still unknown —
+// if the BRD or setup wizard already answered a field, no pause fires.
+
+const YES_NO: PauseOption[] = [
+  { value: 'true',  label: 'Yes', description: '' },
+  { value: 'false', label: 'No',  description: '' },
+]
+
+function boolQuestion(
+  field: string,
+  sectionNum: string,
+  sectionName: string,
+  question: string,
+  decisions: ArchitectureDecisions,
+): PauseQuestion {
+  const guess = aiGuessFor(field as keyof ArchitectureDecisions, decisions)
+  return {
+    field, sectionNum, sectionName, question,
+    subtitle:     guess ? `AI inferred: ${guess}` : undefined,
+    inputType:    'select',
+    options:      YES_NO,
+    defaultValue: 'false',
+  }
+}
+
+function boolSub(field: string, question: string): PauseSubQuestion {
+  return { field, question, inputType: 'select', options: YES_NO, defaultValue: 'false' }
+}
+
+function textSub(field: string, question: string): PauseSubQuestion {
+  return { field, question, inputType: 'text', options: [], defaultValue: '' }
+}
+
+// Returns ONE pause question for this section, or null to generate immediately.
+// `handled` holds fields already paused on (so a skipped/empty answer never loops).
+// Call repeatedly until it returns null — a section may have a follow-up (e.g. §09
+// asks needsRealtime, then realtimeMethod).
+export function getMidGenQuestion(
+  sectionNum: string,
+  decisions: ArchitectureDecisions,
+  handled: Set<string>,
+): PauseQuestion | null {
+  const d = decisions as unknown as Record<string, unknown>
+  const conf      = (f: string): number  => decisions.confidence[f] ?? 0
+  const isNull    = (f: string): boolean => d[f] == null
+  const isEmptyArr = (f: string): boolean => { const v = d[f]; return !Array.isArray(v) || v.length === 0 }
+
+  // §09 — Real-time & Events
+  if (sectionNum === '09') {
+    if (!handled.has('needsRealtime') && (isNull('needsRealtime') || conf('needsRealtime') < 0.5)) {
+      return boolQuestion('needsRealtime', '09', 'Real-time & Events',
+        'Does your app need real-time features? (live chat, live tracking, collaborative editing, live dashboards)',
+        decisions)
+    }
+    if (!handled.has('realtimeMethod') && decisions.needsRealtime === true && isNull('realtimeMethod')) {
+      return {
+        field: 'realtimeMethod', sectionNum: '09', sectionName: 'Real-time & Events',
+        question: 'Which real-time method suits your app?',
+        inputType: 'select',
+        options: [
+          { value: 'WebSocket', label: 'WebSocket — bidirectional', description: 'Chat, collaborative editing, presence' },
+          { value: 'SSE',       label: 'SSE — server-push only',   description: 'Notifications, live feeds, dashboards' },
+          { value: 'polling',   label: 'Polling — periodic refresh', description: 'Simplest; good enough for slow updates' },
+        ],
+        defaultValue: 'WebSocket',
+      }
+    }
+  }
+
+  // §10 — File Storage
+  if (sectionNum === '10') {
+    if (!handled.has('needsFileStorage') && isNull('needsFileStorage')) {
+      return boolQuestion('needsFileStorage', '10', 'File Storage',
+        'Will users upload files, images, videos, or documents?', decisions)
+    }
+    if (!handled.has('fileStorageProvider') && decisions.needsFileStorage === true && isNull('fileStorageProvider')) {
+      return {
+        field: 'fileStorageProvider', sectionNum: '10', sectionName: 'File Storage',
+        question: 'Which file storage provider will you use?',
+        inputType: 'select',
+        options: [
+          { value: 'Supabase Storage', label: 'Supabase Storage', description: 'Simple, S3-compatible object storage' },
+          { value: 'S3',               label: 'AWS S3',           description: 'Industry-standard object storage' },
+          { value: 'Cloudinary',       label: 'Cloudinary',       description: 'Images / video with transformations' },
+        ],
+        defaultValue: 'Supabase Storage',
+      }
+    }
+  }
+
+  // §18 — Security Architecture (HIPAA gate).
+  // NOTE: the spec calls this "§16 Security"; in this codebase §16 is rate limiting
+  // and §18 is the Security Architecture section that consumes hipaaRequired. §18
+  // runs before §20, so HIPAA is known before both security and compliance sections.
+  if (sectionNum === '18') {
+    if (!handled.has('hipaaRequired') && isNull('hipaaRequired')) {
+      return boolQuestion('hipaaRequired', '18', 'Security Architecture',
+        'Will your app handle any health, medical, or clinical data? This determines your entire security architecture.',
+        decisions)
+    }
+  }
+
+  // §20 — Compliance. ALWAYS confirm: ask every still-unanswered compliance field
+  // together in one multi-question pause.
+  if (sectionNum === '20' && !handled.has('compliance')) {
+    const subs: PauseSubQuestion[] = []
+    if (isNull('gdprRequired'))  subs.push(boolSub('gdprRequired',  'Will you serve users in the EU? (GDPR)'))
+    if (isNull('hipaaRequired')) subs.push(boolSub('hipaaRequired', 'Will your app handle health or medical data? (HIPAA)'))
+    if (isNull('pciRequired'))   subs.push(boolSub('pciRequired',   'Will you store or process raw credit-card data? (PCI-DSS)'))
+    if (isEmptyArr('launchRegions'))      subs.push(textSub('launchRegions',      'Which countries or regions are you launching in? (comma-separated)'))
+    if (isEmptyArr('sensitiveDataTypes')) subs.push(textSub('sensitiveDataTypes', 'What sensitive data will your app store? (comma-separated)'))
+
+    if (subs.length === 0) return null // everything already known — nothing to confirm
+    return {
+      field: 'compliance', sectionNum: '20', sectionName: 'Compliance & Data Governance',
+      question: 'Confirm your compliance requirements',
+      subtitle: 'These shape the entire compliance and data-governance architecture.',
+      inputType: 'select', options: [], defaultValue: '',
+      questions: subs,
+    }
+  }
+
+  // §31 — Internationalisation
+  if (sectionNum === '31') {
+    if (!handled.has('multiLanguage') && isNull('multiLanguage')) {
+      return boolQuestion('multiLanguage', '31', 'Internationalisation',
+        'Does your app need to support multiple languages?', decisions)
+    }
+    if (!handled.has('languages') && decisions.multiLanguage === true && isEmptyArr('languages')) {
+      return {
+        field: 'languages', sectionNum: '31', sectionName: 'Internationalisation',
+        question: 'Which languages do you need to support? (comma-separated, e.g. English, Hindi, French)',
+        inputType: 'text', options: [], defaultValue: '',
+      }
+    }
+  }
+
+  return null
 }
 
 // ── BRD insights (what the AI understood) ─────────────────────────────────────

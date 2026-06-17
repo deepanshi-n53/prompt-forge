@@ -1,7 +1,7 @@
 import { notFound, redirect } from 'next/navigation'
 import { db } from '@/lib/db/prisma'
 import { requireAuth } from '@/lib/auth'
-import { analyzeGaps, buildInsights, summarizeConfidence } from '@/lib/ai/gap-analyzer'
+import { getSetupQuestions, buildInsights, summarizeConfidence } from '@/lib/ai/gap-analyzer'
 import { emptyDecisions, normalizeDecisions } from '@/lib/ai/brd-parser'
 import { Wizard } from './_components/Wizard'
 import { RetryBanner } from './_components/RetryBanner'
@@ -38,7 +38,7 @@ export default async function SetupPage({
     : emptyDecisions()
 
   const insightGroups = buildInsights(decisions)
-  const gapQuestions  = analyzeGaps(decisions)
+  const gapQuestions  = getSetupQuestions(decisions)
   const { confirmed, inferred, unknown } = summarizeConfidence(decisions)
 
   return (

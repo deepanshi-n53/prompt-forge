@@ -32,20 +32,29 @@ export async function POST(request: NextRequest, { params }: Context) {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
   }
 
-  const { field, answer } = body as { field?: string; answer?: string }
-  if (!field || !answer) {
-    return NextResponse.json({ error: 'field and answer are required' }, { status: 422 })
+  const { field, answer, answers } = body as {
+    field?:   string
+    answer?:  string
+    answers?: Record<string, string>
+  }
+  // A pause is either single-field (answer) or multi-question (answers map, e.g.
+  // §20 compliance). Require the field key plus at least one of the two payloads.
+  const hasAnswers = answers && typeof answers === 'object' && Object.keys(answers).length > 0
+  if (!field || (!answer && !hasAnswers)) {
+    return NextResponse.json({ error: 'field and answer (or answers) are required' }, { status: 422 })
   }
 
   // Send the event that resumes the paused Inngest function. The waitForEvent in
   // generate-prompts filters on async.data.projectId + async.data.field, so these
-  // keys must match exactly (they do).
+  // keys must match exactly (they do). Both answer and answers are forwarded;
+  // applyMidGenAnswer picks the right one based on the question shape.
   await inngest.send({
     name: 'brd/pause-answered',
     data: {
       projectId: id,
       field,
-      answer,
+      ...(answer  !== undefined ? { answer }  : {}),
+      ...(hasAnswers              ? { answers } : {}),
     },
   })
 

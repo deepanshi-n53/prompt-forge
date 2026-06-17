@@ -5,7 +5,6 @@ import { requireAuth } from '@/lib/auth'
 import { inngest } from '@/inngest/client'
 import { decisionsToWizardAnswers } from '@/lib/ai/decision-builder'
 import { emptyDecisions, normalizeDecisions } from '@/lib/ai/brd-parser'
-import { applyArchitectureDefaults } from '@/lib/ai/architecture-defaults'
 import { logger } from '@/lib/logger'
 
 type Context = { params: Promise<{ id: string }> }
@@ -52,13 +51,13 @@ export async function POST(_req: NextRequest, { params }: Context) {
   }
 
   // Reconstruct the same brd/answered payload the setup wizard produced, from the
-  // merged decisions already stored on the BRD — then fill every blank field with
-  // a default so a retry NEVER stalls on the same missing decision again.
+  // merged decisions already stored on the BRD. Any field still unknown is NOT
+  // silently defaulted — the cascade re-asks it via a mid-gen pause, exactly as a
+  // first run would (no artificial caps, no generic silent defaults).
   const parsedContent = (activeBrd.parsedContent ?? {}) as Record<string, unknown>
-  const baseDecisions = parsedContent.architectureDecisions
+  const decisions = parsedContent.architectureDecisions
     ? normalizeDecisions(parsedContent.architectureDecisions as Record<string, unknown>)
     : emptyDecisions()
-  const decisions = applyArchitectureDefaults(baseDecisions)
 
   const wizardAnswers = decisionsToWizardAnswers(decisions)
   const track = (decisions.track ?? project.track) as Track

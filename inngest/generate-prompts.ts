@@ -6,11 +6,11 @@ import type { SectionTemplate } from '@/lib/ai/section-templates'
 import { sendPromptsReadyEmail } from '@/lib/email'
 import { setJobState } from '@/lib/jobs/redis'
 import { applyAnswersToDecisions, emptyDecisions, normalizeDecisions } from '@/lib/ai/brd-parser'
-import { applyArchitectureDefaults } from '@/lib/ai/architecture-defaults'
+import { getMidGenQuestion } from '@/lib/ai/gap-analyzer'
 import { Prisma, ProjectStatus, Track, PromptStatus } from '@prisma/client'
 import type { ArchitectureDecisions, ParsedBRD } from '@/types/brd'
 import type { DecisionGraph, SectionDecision } from '@/types/decision'
-import type { PauseOption, PauseInputType } from '@/types/api'
+import type { PauseQuestion } from '@/types/api'
 
 interface BRDAnsweredPayload {
   projectId:       string
@@ -95,56 +95,6 @@ function flattenDecisions(d: ArchitectureDecisions): Record<string, string> {
   }
   return out
 }
-
-// ── Human pause checkpoints ───────────────────────────────────────────────────
-
-interface PauseSpec {
-  question:     string
-  subtitle:     string
-  inputType:    PauseInputType
-  options:      PauseOption[]
-  defaultValue: string
-}
-
-const PAUSE_SPECS: Record<string, PauseSpec> = {
-  needsRealtime: {
-    question: 'Does your app need real-time features (live chat, live feed, collaborative editing)?',
-    subtitle: 'This affects the entire backend architecture — websockets, SSE, or polling.',
-    inputType: 'select',
-    options: [
-      { value: 'true',  label: 'Yes — real-time needed', description: 'Live chat, live feeds, presence, or collaborative editing' },
-      { value: 'false', label: 'No — standard updates',   description: 'Page refresh and periodic polling are sufficient' },
-    ],
-    defaultValue: 'false',
-  },
-  hipaaRequired: {
-    question: 'Will this app store or process health / medical data (PHI)?',
-    subtitle: 'HIPAA reshapes the entire security architecture — encryption, audit logging, and access controls.',
-    inputType: 'select',
-    options: [
-      { value: 'true',  label: 'Yes — handles health data', description: 'Patient records, diagnoses, treatment, or other PHI' },
-      { value: 'false', label: 'No — no health data',        description: 'No protected health information is stored' },
-    ],
-    defaultValue: 'false',
-  },
-  compliance: {
-    question: 'Please confirm your compliance requirements. Which apply to your app?',
-    subtitle: 'Select all that apply — this changes the entire §20 compliance architecture.',
-    inputType: 'multiselect',
-    options: [
-      { value: 'GDPR',    label: 'GDPR',    description: 'EU / UK personal-data protection' },
-      { value: 'HIPAA',   label: 'HIPAA',   description: 'US health / medical data' },
-      { value: 'PCI-DSS', label: 'PCI-DSS', description: 'Storing or processing card data' },
-      { value: 'SOC2',    label: 'SOC2',    description: 'Enterprise security attestation' },
-      { value: 'None',    label: 'None',    description: 'No regulated data at launch' },
-    ],
-    defaultValue: 'None',
-  },
-}
-
-// Boolean pause answers render as Yes/No selects; their answer is normalised to
-// 'yes'/'no' in the flat locked map every section reads.
-const BOOL_PAUSE_FIELDS = new Set(['needsRealtime', 'hipaaRequired'])
 
 export const generatePromptsJob = inngest.createFunction(
   {
@@ -232,12 +182,6 @@ export const generatePromptsJob = inngest.createFunction(
       ? normalizeDecisions(decisionsRaw as Record<string, unknown>)
       : emptyDecisions()
 
-    // Fill every non-pausing architecture field the BRD + wizard left blank with a
-    // sensible default, so the cascade NEVER blocks on dbEngine/authMethod/etc.
-    // (confidence is left untouched, so the §09/§18 pauses can still fire). This is
-    // the seed for the flat locked map below.
-    decisions = applyArchitectureDefaults(decisions)
-
     // ── Step 2: Select sections in cascade order ──────────────────────────────
 
     const orderedNums = await step.run('select-sections', async () => {
@@ -271,56 +215,28 @@ export const generatePromptsJob = inngest.createFunction(
     const handled       = new Set<string>()
     let   completedIdx  = 0
 
-    const conf = (field: string): number => decisions.confidence[field] ?? 0
-
-    // The ONLY three pauses that may ever block generation. Every other decision
-    // (dbEngine, authMethod, cacheLayer, …) resolves to ARCHITECTURE_DEFAULTS and
-    // continues — see lib/ai/architecture-defaults. Returns the pause field key
-    // (looked up in PAUSE_SPECS) or null to generate the section immediately.
-    function shouldPause(sectionNum: string): string | null {
-      // PAUSE 1 — §20 Compliance. ALWAYS confirm which regimes apply.
-      if (sectionNum === '20' && !handled.has('compliance')) return 'compliance'
-
-      // PAUSE 2 — §09 Real-time, ONLY when genuinely unknown (confidence < 0.5).
-      if (sectionNum === '09' && !handled.has('needsRealtime') && conf('needsRealtime') < 0.5)
-        return 'needsRealtime'
-
-      // PAUSE 3 — Security architecture, ONLY when HIPAA is genuinely unknown.
-      // NOTE: the spec calls this "§16 Security"; in THIS codebase §16 is rate
-      // limiting and §18 is the Security Architecture section that consumes
-      // hipaaRequired (encryption, audit logging), so the pause lives at §18.
-      if (sectionNum === '18' && !handled.has('hipaaRequired') && conf('hipaaRequired') < 0.5)
-        return 'hipaaRequired'
-
-      return null
-    }
-
-    // Merge a pause answer back into BOTH the rich decisions (for confidence /
-    // dedupe) and the flat locked map (for downstream prompts), at confidence 1.0.
-    function applyPauseAnswer(field: string, answer: string): void {
-      if (field === 'compliance') {
-        const picked = answer.split(',').map(s => s.trim().toLowerCase())
-        const gdpr  = picked.includes('gdpr')
-        const hipaa = picked.includes('hipaa')
-        const pci   = picked.includes('pci-dss') || picked.includes('pci')
-        decisions = applyAnswersToDecisions(decisions, {
-          gdprRequired:  gdpr  ? 'true' : 'false',
-          hipaaRequired: hipaa ? 'true' : 'false',
-          pciRequired:   pci   ? 'true' : 'false',
-        })
-        lockedDecisions.gdprRequired        = gdpr  ? 'yes' : 'no'
-        lockedDecisions.hipaaRequired       = hipaa ? 'yes' : 'no'
-        lockedDecisions.pciRequired         = pci   ? 'yes' : 'no'
-        lockedDecisions.complianceConfirmed = answer
-        handled.add('compliance')
-        return
+    // Merge a mid-gen pause answer back into BOTH the rich decisions (for
+    // confidence / dedupe) and the flat locked map (for downstream prompts), at
+    // confidence 1.0. Handles a single-field pause (data.answer) and a
+    // multi-question pause such as §20 compliance (data.answers map). A blank /
+    // skipped answer falls back to the question's defaultValue.
+    function applyMidGenAnswer(q: PauseQuestion, data: Record<string, unknown> | null): void {
+      if (q.questions && q.questions.length > 0) {
+        const answers = (data?.answers as Record<string, string> | undefined) ?? {}
+        const merged: Record<string, string> = {}
+        for (const sub of q.questions) {
+          const a = answers[sub.field]
+          merged[sub.field] = a && a.trim() ? a.trim() : sub.defaultValue
+        }
+        decisions = applyAnswersToDecisions(decisions, merged)
+      } else {
+        const raw    = data?.answer as string | undefined
+        const answer = raw && raw.trim() ? raw.trim() : q.defaultValue
+        decisions = applyAnswersToDecisions(decisions, { [q.field]: answer })
       }
-
-      decisions = applyAnswersToDecisions(decisions, { [field]: answer })
-      lockedDecisions[field] = BOOL_PAUSE_FIELDS.has(field)
-        ? (/^(true|yes|y|1)$/i.test(answer) ? 'yes' : 'no')
-        : answer
-      handled.add(field)
+      // Re-flatten so every field the answer touched (booleans → yes/no, arrays →
+      // joined) overwrites the locked map the downstream sections read.
+      Object.assign(lockedDecisions, flattenDecisions(decisions))
     }
 
     for (const sectionNum of orderedNums) {
@@ -329,51 +245,47 @@ export const generatePromptsJob = inngest.createFunction(
 
       const pct = 15 + Math.round((completedIdx / totalSections) * 75)
 
-      // ── Human pause checkpoint (at most one per section) ────────────────────
-      const pauseField = shouldPause(sectionNum)
-      if (pauseField) {
-        const spec = PAUSE_SPECS[pauseField]
+      // ── Human pause checkpoints ─────────────────────────────────────────────
+      // A section may need more than one answer (e.g. §09 asks needsRealtime, then
+      // realtimeMethod). Re-evaluate after every merge: getMidGenQuestion returns
+      // the next unanswered question or null. `handled` guards each field so a
+      // skipped (empty) answer never re-triggers the same pause. NO hardcoded list
+      // of pausing sections — it's driven entirely by what's still unknown.
+      let pauseQ: PauseQuestion | null
+      while ((pauseQ = getMidGenQuestion(sectionNum, decisions, handled)) != null) {
+        const q = pauseQ
+        const field = q.field
 
         // Write the paused state inside a step so it is memoized — a raw
         // side-effect would re-fire on every Inngest replay and flicker Redis.
-        await step.run(`pause-state-${pauseField}`, () =>
+        await step.run(`pause-state-${field}`, () =>
           setJobState(projectId, {
             status:  'paused',
             percent: pct,
-            step:    `pause-${pauseField}`,
+            step:    `pause-${field}`,
             message: `Paused at §${sectionNum} — ${tmpl.name}`,
-            pauseQuestion: {
-              field:        pauseField,
-              sectionNum,
-              sectionName:  tmpl.name,
-              question:     spec.question,
-              subtitle:     spec.subtitle,
-              inputType:    spec.inputType,
-              options:      spec.options,
-              defaultValue: spec.defaultValue,
-            },
+            pauseQuestion: { ...q, sectionNum, sectionName: q.sectionName ?? tmpl.name },
           }),
         )
 
-        const pauseEvent = await step.waitForEvent(`wait-${pauseField}`, {
+        const pauseEvent = await step.waitForEvent(`wait-${field}`, {
           event:   'brd/pause-answered',
           timeout: '2h',
-          if:      `async.data.projectId == "${projectId}" && async.data.field == "${pauseField}"`,
+          if:      `async.data.projectId == "${projectId}" && async.data.field == "${field}"`,
         })
 
-        const rawAnswer = (pauseEvent?.data as Record<string, string> | null)?.answer
-        const answer = rawAnswer && rawAnswer.trim() ? rawAnswer.trim() : spec.defaultValue
-        applyPauseAnswer(pauseField, answer)
+        applyMidGenAnswer(q, (pauseEvent?.data as Record<string, unknown> | null) ?? null)
+        handled.add(field)
 
         // Clear the paused state in Redis the instant we resume — without this,
         // a reconnect during the gap before the next section completes would
         // re-surface the (already-answered) pause modal. Memoized so it doesn't
         // re-fire on replay.
-        await step.run(`resume-${pauseField}`, () =>
+        await step.run(`resume-${field}`, () =>
           setJobState(projectId, {
             status:  'running',
             percent: pct,
-            step:    `resume-${pauseField}`,
+            step:    `resume-${field}`,
             message: 'Answer received — resuming generation…',
           }),
         )
