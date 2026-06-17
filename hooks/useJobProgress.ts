@@ -108,6 +108,19 @@ export function useJobProgress(jobId: string | null): JobProgress {
       }
     }
 
+    // Seed the latest state immediately on mount/reconnect — before the SSE
+    // handshake completes — so a refresh mid-pause surfaces the pause modal at
+    // once instead of showing a frozen bar until the first SSE frame arrives.
+    async function seedInitialState() {
+      try {
+        const res = await fetch(`/api/jobs/${jobId}`)
+        if (!res.ok || done) return
+        const { state } = (await res.json()) as { state: JobProgress | null }
+        if (state && !done) apply(state)
+      } catch { /* SSE will catch up */ }
+    }
+
+    seedInitialState()
     connectSSE()
     return teardown
   }, [jobId])

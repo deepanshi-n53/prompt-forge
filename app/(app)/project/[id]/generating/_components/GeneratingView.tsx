@@ -206,33 +206,29 @@ export function GeneratingView({ projectId, jobId, isOnboarding = false }: Gener
   // If nothing advances for 4 minutes while still generating, surface a warning
   // with an escape hatch — generation can silently stall on a slow AI response.
   const STUCK_AFTER_MS = 240_000
-  const lastProgressAt = useRef<number>(Date.now())
+  const lastProgressAt = useRef<number>(0)
   const lastCompleted  = useRef<number>(0)
   const [isStuck, setIsStuck] = useState(false)
 
   const isActive = !isComplete && !isFailed && !isPaused
 
-  // Reset the stall timer whenever completedSections increases.
+  // Record the wall-clock time of forward progress (a section completing) in a
+  // ref only — no state writes here, so Date.now() never runs during render.
   useEffect(() => {
     if (completedSections > lastCompleted.current) {
-      lastCompleted.current = completedSections
+      lastCompleted.current  = completedSections
       lastProgressAt.current = Date.now()
-      setIsStuck(false)
     }
   }, [completedSections])
 
-  // Re-arm the timer when generation (re)starts so a finished/paused run never
-  // shows the warning.
-  useEffect(() => {
-    if (isActive) lastProgressAt.current = Date.now()
-    else setIsStuck(false)
-  }, [isActive])
-
-  // Poll every 30s — flip to stuck once we've gone STUCK_AFTER_MS without progress.
+  // While generating, arm a 30s checker. setState lives only in the timer
+  // callback (async) — never synchronously in the effect body. The banner is
+  // also gated on isActive, so a finished/paused run never shows it.
   useEffect(() => {
     if (!isActive) return
+    lastProgressAt.current = Date.now()
     const t = setInterval(() => {
-      if (Date.now() - lastProgressAt.current > STUCK_AFTER_MS) setIsStuck(true)
+      setIsStuck(Date.now() - lastProgressAt.current > STUCK_AFTER_MS)
     }, 30_000)
     return () => clearInterval(t)
   }, [isActive])

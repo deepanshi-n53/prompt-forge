@@ -484,6 +484,19 @@ export const generatePromptsJob = inngest.createFunction(
         const rawAnswer = (pauseEvent?.data as Record<string, string> | null)?.answer
         const answer = rawAnswer && rawAnswer.trim() ? rawAnswer.trim() : spec.defaultValue
         applyPauseAnswer(pauseField, answer)
+
+        // Clear the paused state in Redis the instant we resume — without this,
+        // a reconnect during the gap before the next section completes would
+        // re-surface the (already-answered) pause modal. Memoized so it doesn't
+        // re-fire on replay.
+        await step.run(`resume-${pauseField}`, () =>
+          setJobState(projectId, {
+            status:  'running',
+            percent: pct,
+            step:    `resume-${pauseField}`,
+            message: 'Answer received — resuming generation…',
+          }),
+        )
       }
 
       // Snapshot the full locked set BY VALUE — Inngest callbacks don't re-run on

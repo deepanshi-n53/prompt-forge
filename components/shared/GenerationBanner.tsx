@@ -28,17 +28,27 @@ export function GenerationBanner() {
         const res = await fetch('/api/projects?status=PROCESSING', { cache: 'no-store' })
         if (!res.ok || cancelled) return
         const data = (await res.json()) as { projects?: ActiveProject[] }
+        // Empty result → clear immediately so a just-deleted/finished project's
+        // name never lingers until the next interval.
         if (!cancelled) setActive(data.projects ?? [])
       } catch {
         /* network hiccup — keep last known state */
       }
     }
 
+    // Re-poll the instant a project is deleted elsewhere (e.g. the dashboard),
+    // rather than waiting up to POLL_MS for the banner to notice it's gone.
+    function onProjectDeleted() {
+      check()
+    }
+
     check()
     timer = setInterval(check, POLL_MS)
+    window.addEventListener('project-deleted', onProjectDeleted)
     return () => {
       cancelled = true
       if (timer) clearInterval(timer)
+      window.removeEventListener('project-deleted', onProjectDeleted)
     }
   }, [])
 

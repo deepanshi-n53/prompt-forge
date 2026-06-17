@@ -133,6 +133,9 @@ export function ProjectCard({ project }: ProjectCardProps) {
       const res = await fetch(`/api/projects/${project.id}`, { method: 'DELETE' })
       if (res.ok) {
         setDialogOpen(false)
+        // Tell the global generation banner to re-poll now so it drops this
+        // project immediately instead of showing its stale name for ~10s.
+        window.dispatchEvent(new CustomEvent('project-deleted'))
         router.refresh()
       }
     } finally {
