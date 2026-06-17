@@ -250,6 +250,7 @@ function QuestionsForm({
                     <div className="mt-1.5 inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5 text-[11px] text-amber-700">
                       <span className="inline-block h-1.5 w-1.5 rounded-full bg-amber-400" />
                       I inferred: <strong>{q.aiGuess}</strong>
+                      {q.preFilledAnswer && <span className="text-amber-500"> — confirm or change</span>}
                     </div>
                   )}
                   <div className="mt-3">
@@ -312,7 +313,15 @@ export function Wizard({
   const router = useRouter()
 
   const [phase, setPhase]           = useState<'summary' | 'questions'>('summary')
-  const [answers, setAnswers]       = useState<Record<string, string>>({})
+  // Seed answers with the parser's inferred values so 0.5–0.7 questions arrive
+  // pre-selected — the user just confirms (clicks through) or changes them.
+  const [answers, setAnswers]       = useState<Record<string, string>>(() => {
+    const init: Record<string, string> = {}
+    for (const q of gapQuestions) {
+      if (q.preFilledAnswer != null && q.preFilledAnswer !== '') init[q.field] = q.preFilledAnswer
+    }
+    return init
+  })
   const [submitting, setSubmitting] = useState(false)
   const [error, setError]           = useState('')
 

@@ -6,13 +6,14 @@ export type GapInputType = 'text' | 'select' | 'multiselect' | 'boolean'
 
 // A question is generated ONLY for a field the BRD did not confidently answer.
 export interface GapQuestion {
-  field:      string                 // ArchitectureDecisions field name
-  group:      string                 // Foundation | Architecture | Auth & Security | Integrations | Compliance
-  question:   string                 // conversational prompt shown to the user
-  aiGuess:    string | null          // what the parser inferred, or null if nothing
-  confidence: number                 // current confidence (0.0–0.69)
-  inputType:  GapInputType
-  options:    string[] | null        // for select / multiselect
+  field:           string             // ArchitectureDecisions field name
+  group:           string             // Foundation | Architecture | Auth & Security | Integrations | Compliance
+  question:        string             // conversational prompt shown to the user
+  aiGuess:         string | null      // what the parser inferred, or null if nothing
+  preFilledAnswer: string | null      // inferred value (wizard input format) pre-selected when 0.5 ≤ conf < 0.7
+  confidence:      number             // current confidence (0.0–0.69)
+  inputType:       GapInputType
+  options:         string[] | null    // for select / multiselect
 }
 
 export interface BRDInsight {
@@ -29,8 +30,16 @@ export interface InsightGroup {
 
 // ── Tunables ──────────────────────────────────────────────────────────────────
 
+// ≥ 0.7  → the BRD answered it; never ask.
+// 0.5–0.7 → inferred; show as a PRE-FILLED answer the user confirms or changes.
+// < 0.5  → genuine gap; ask as a blank question.
 const CONFIDENCE_THRESHOLD = 0.7
+const INFER_THRESHOLD      = 0.5
 const MAX_QUESTIONS = 12
+
+// The Foundation group is skipped entirely when every one of these is at least
+// inferred — most BRDs describe what the app does, so these should rarely be asked.
+const FOUNDATION_FIELDS = ['appName', 'appType', 'platform', 'userTypes', 'coreFeatures'] as const
 
 // Critical fields in PRIORITY order. Earlier entries survive the 12-question cap.
 interface FieldMeta {
@@ -109,6 +118,16 @@ function aiGuessFor(field: keyof ArchitectureDecisions, d: ArchitectureDecisions
   return displayValue(field, d)
 }
 
+// The inferred value in the EXACT format the wizard's inputs expect, so it can be
+// pre-selected: boolean → 'true'/'false', arrays → comma-joined, else the raw value.
+function answerValueFor(field: keyof ArchitectureDecisions, d: ArchitectureDecisions): string | null {
+  const v = d[field]
+  if (v == null) return null
+  if (Array.isArray(v)) return v.length > 0 ? v.join(', ') : null
+  if (typeof v === 'boolean') return v ? 'true' : 'false'
+  return String(v)
+}
+
 // ── Gap detection ─────────────────────────────────────────────────────────────
 
 // Returns questions ONLY for fields whose confidence is below the threshold,
@@ -116,18 +135,29 @@ function aiGuessFor(field: keyof ArchitectureDecisions, d: ArchitectureDecisions
 export function analyzeGaps(decisions: ArchitectureDecisions): GapQuestion[] {
   const gaps: GapQuestion[] = []
 
+  // Skip the whole Foundation group when every foundation field is at least
+  // inferred — the BRD clearly describes the product, so don't re-ask it.
+  const skipFoundation = FOUNDATION_FIELDS.every(
+    (f) => effectiveConfidence(f as keyof ArchitectureDecisions, decisions) >= INFER_THRESHOLD,
+  )
+
   for (const meta of CRITICAL_FIELDS) {
     const conf = effectiveConfidence(meta.field, decisions)
-    if (conf >= CONFIDENCE_THRESHOLD) continue // BRD already answered this
+    if (conf >= CONFIDENCE_THRESHOLD) continue                    // BRD already answered this
+    if (meta.group === 'Foundation' && skipFoundation) continue   // whole group inferred
+
+    // 0.5–0.7 → pre-fill the inferred value so the user just confirms; < 0.5 → blank.
+    const inferred = conf >= INFER_THRESHOLD ? answerValueFor(meta.field, decisions) : null
 
     gaps.push({
-      field:      meta.field as string,
-      group:      meta.group,
-      question:   meta.question,
-      aiGuess:    aiGuessFor(meta.field, decisions),
-      confidence: Math.min(Math.round(conf * 100) / 100, 0.69),
-      inputType:  meta.inputType,
-      options:    meta.options,
+      field:           meta.field as string,
+      group:           meta.group,
+      question:        meta.question,
+      aiGuess:         aiGuessFor(meta.field, decisions),
+      preFilledAnswer: inferred,
+      confidence:      Math.min(Math.round(conf * 100) / 100, 0.69),
+      inputType:       meta.inputType,
+      options:         meta.options,
     })
 
     if (gaps.length >= MAX_QUESTIONS) break

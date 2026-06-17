@@ -3,30 +3,25 @@ import type { ArchitectureDecisions, Feature, ParsedBRD } from '@/types'
 
 // ── system prompt ─────────────────────────────────────────────────────────────
 
-const SYSTEM_PROMPT = `You are a senior software architect reading a Business Requirements Document (BRD).
-Your job is to extract EVERY architecture-relevant decision the document implies, and to be
-honest about how certain each one is.
+const SYSTEM_PROMPT = `You are an expert software architect. Your job is to extract architectural decisions from a Business Requirements Document (BRD).
 
-For each field below, return its actual value (or null / [] when truly absent) AND record a
-confidence number for it in the "confidence" object, using this scale:
-  1.0 = explicitly stated in the BRD
-  0.7 = strongly inferable from the domain or stated requirements
-  0.4 = weakly inferable / a reasonable default
-  0.0 = not mentioned and not inferable
+CRITICAL RULES:
+1. You MUST infer information even when not explicitly stated. A BRD that says "dog walking marketplace" means: appType=marketplace, userTypes=["dog owners","dog walkers"], paymentProvider="Stripe" (confidence 0.7), needsFileStorage=true (profile photos, confidence 0.7).
+2. A healthcare BRD means hipaaRequired=true at confidence 0.7 even if not stated.
+3. A fintech BRD means pciRequired=true at confidence 0.7, gdprRequired depends on regions.
+4. Confidence scores: 1.0=explicitly stated word-for-word, 0.8=clearly implied by context, 0.6=reasonable inference from domain, 0.4=weak guess, 0.0=genuinely impossible to guess.
+5. NEVER return 0.0 confidence for appName if ANY name is mentioned anywhere in the text.
+6. NEVER return null for appType if the BRD describes any kind of software product.
+7. For platform: if BRD mentions "website", "web app", "browser" → platform="web". If mentions "iOS", "Android", "mobile app" → platform="mobile". If mentions both → platform="both". Default guess if unclear: platform="web" at confidence 0.5.
+8. For userTypes: extract EVERY type of user mentioned. "Admin" counts. "Customer" counts. Look for any noun describing who uses the system.
+9. For coreFeatures: extract EVERY feature mentioned. List everything. No feature is too small.
+10. Return ONLY valid JSON. No markdown. No explanation. No code fences.
 
-INFERENCE IS EXPECTED. Do not leave a field null just because the BRD does not name it
-literally — reason about the product. Examples:
-  - A healthcare / patient app → hipaaRequired = true (confidence 0.7), sensitiveDataTypes
-    includes "PHI", dbEngine = "PostgreSQL" (0.4).
-  - A dog-walking app → appType = "marketplace" (0.7), userTypes = ["dog owners","walkers"]
-    (0.7), paymentProvider = "Stripe" (0.7), needsPaymentSplit = true (0.7),
-    needsRealtime = true for live tracking (0.4).
-  - "Enterprise", "compliance", "SSO", "audit", "high scale" → track = "FULL".
-  - "MVP", "prototype", "quick", "simple", "validate an idea" → track = "FAST".
-  - If neither signal is present, track = null.
+Domain signals for the "track" field: "Enterprise", "compliance", "SSO", "audit", "high scale" → track="FULL". "MVP", "prototype", "quick", "simple", "validate an idea" → track="FAST". If neither signal is present, track=null.
 
-Return ONLY a single valid JSON object — no preamble, no explanation, no markdown fences.
-The object MUST have EXACTLY these keys:
+Return a single valid JSON object with EXACTLY these keys (use null / [] ONLY when a value is
+genuinely impossible to infer — see the rules above). Every non-array, non-confidence field
+MUST have a matching entry in the "confidence" object:
 
 {
   "appName": string|null,
@@ -363,7 +358,7 @@ export async function extractArchitectureDecisions(rawText: string): Promise<Arc
   const response = await callAI(
     [
       { role: 'system', content: SYSTEM_PROMPT },
-      { role: 'user', content: `Extract architecture decisions from this BRD:\n\n${rawText.slice(0, 400_000)}` },
+      { role: 'user', content: `Here is the BRD text. Extract all architectural decisions:\n\n${rawText.slice(0, 400_000)}` },
     ],
     4096,
     // Greedy decoding so the same BRD always yields the same decisions (and score).
