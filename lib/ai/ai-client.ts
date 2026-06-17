@@ -11,9 +11,15 @@ interface AIResponse {
   text: string
 }
 
+interface AICallOptions {
+  temperature?: number
+  seed?:        number
+}
+
 export async function callAI(
   messages: AIMessage[],
   maxTokens: number = 4000,
+  options: AICallOptions = {},
 ): Promise<AIResponse> {
   const provider = process.env.AI_PROVIDER ?? 'openai'
 
@@ -49,6 +55,7 @@ export async function callAI(
       model:      'claude-sonnet-4-6',
       max_tokens: maxTokens,
       system:     systemMsg,
+      ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
       messages:   userMessages.map((m) => ({
         role:    m.role as 'user' | 'assistant',
         content: m.content,
@@ -67,6 +74,10 @@ export async function callAI(
     model:      'gpt-4o',
     max_tokens: maxTokens,
     messages:   messages,
+    // Greedy, reproducible decoding when the caller asks for it (e.g. BRD
+    // extraction) — same input → same output, so health scores stay stable.
+    ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
+    ...(options.seed !== undefined ? { seed: options.seed } : {}),
   })
   return { text: response.choices[0].message.content ?? '' }
 }

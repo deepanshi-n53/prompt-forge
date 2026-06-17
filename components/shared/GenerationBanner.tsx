@@ -59,7 +59,7 @@ export function GenerationBanner() {
       <span className="inline-flex h-2 w-2 animate-pulse-dot rounded-full bg-amber-500" />
       <span className="truncate">
         ⚡ Generating prompts for <strong>{first.name}</strong>
-        {more > 0 && ` and ${more} other project${more !== 1 ? 's' : ''}`}
+        {more > 0 && ` +${more} more`}
       </span>
       <Link
         href={`/project/${first.id}/generating?jobId=${first.id}`}

@@ -1,12 +1,10 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useJobProgress } from '@/hooks/useJobProgress'
 import { GenerationPauseModal } from '@/components/shared/GenerationPauseModal'
 import { cn } from '@/lib/utils'
-
-const SLOW_THRESHOLD_MS = 30_000
 
 // ── Animated SVG ring ─────────────────────────────────────────────────────────
 
@@ -134,9 +132,7 @@ interface GeneratingViewProps {
 export function GeneratingView({ projectId, jobId, isOnboarding = false }: GeneratingViewProps) {
   const router      = useRouter()
   const progress    = useJobProgress(jobId)
-  const [slow, setSlow]         = useState(false)
   const [dbStatus, setDbStatus] = useState<'ready' | 'error' | null>(null)
-  const slowTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // DB fallback poll — works even if Redis/SSE is not configured
   // Polls project status directly; if READY → redirect, if ERROR → show error
@@ -177,17 +173,6 @@ export function GeneratingView({ projectId, jobId, isOnboarding = false }: Gener
     }
   }, [progress.status, dbStatus, projectId, isOnboarding, router])
 
-  // Start slow-timer when generation begins, cancel on completion/failure
-  useEffect(() => {
-    if (progress.status === 'running' && !slow) {
-      slowTimer.current = setTimeout(() => setSlow(true), SLOW_THRESHOLD_MS)
-    }
-    if (progress.status === 'complete' || progress.status === 'failed') {
-      if (slowTimer.current) clearTimeout(slowTimer.current)
-    }
-    return () => { if (slowTimer.current) clearTimeout(slowTimer.current) }
-  }, [progress.status, slow])
-
   // Track which pause question was answered (by field), NOT a one-shot boolean —
   // a single generation can pause multiple times (e.g. §06 MFA, §09 real-time,
   // §12 payments, §20 compliance), so we must re-show the modal per question.
@@ -201,6 +186,20 @@ export function GeneratingView({ projectId, jobId, isOnboarding = false }: Gener
   const isComplete = progress.status === 'complete' || dbStatus === 'ready'
   // When DB says ready but Redis has no data, show 100%
   const displayPercent = dbStatus === 'ready' ? 100 : progress.percent
+
+  // Honest ETA — parse the "(completed/total)" the generator embeds in its status
+  // message, falling back to a coarse estimate. ~4s per remaining section.
+  const sectionMatch      = progress.message?.match(/\((\d+)\s*\/\s*(\d+)\)/)
+  const completedSections = sectionMatch ? parseInt(sectionMatch[1], 10) : 0
+  const totalSections     = sectionMatch ? parseInt(sectionMatch[2], 10) : 0
+  const remainingSections = Math.max(0, totalSections - completedSections)
+  const estimatedMinutes  = Math.ceil((remainingSections * 4) / 60)
+
+  const etaText =
+    displayPercent >= 90                            ? 'Almost done…'
+    : completedSections === 0 || totalSections === 0 ? 'Estimated 3–5 minutes — complex apps may take longer'
+    : estimatedMinutes <= 1                          ? 'About 1 minute remaining'
+    :                                                  `About ${estimatedMinutes} minutes remaining`
 
   return (
     <div className="flex min-h-full flex-col items-center justify-center px-4 py-12">
@@ -296,20 +295,12 @@ export function GeneratingView({ projectId, jobId, isOnboarding = false }: Gener
         )}
 
         {!isFailed && !isComplete && (
-          slow ? (
-            <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-center">
-              <p className="text-sm font-medium text-amber-800">
-                Taking longer than expected
-              </p>
-              <p className="mt-0.5 text-xs text-amber-600">
-                Usually ready in 90 seconds. You can close this tab — your prompts will be saved.
-              </p>
-            </div>
-          ) : (
+          <div className="space-y-1">
+            <p className="text-sm font-medium text-zinc-600">{etaText}</p>
             <p className="text-xs text-zinc-400">
-              This takes 30–90 seconds. You can close this tab — your prompts will be ready when you return.
+              Generation runs in the background. You can safely close this tab and return later.
             </p>
-          )
+          </div>
         )}
       </div>
     </div>

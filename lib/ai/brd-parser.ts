@@ -366,6 +366,8 @@ export async function extractArchitectureDecisions(rawText: string): Promise<Arc
       { role: 'user', content: `Extract architecture decisions from this BRD:\n\n${rawText.slice(0, 400_000)}` },
     ],
     4096,
+    // Greedy decoding so the same BRD always yields the same decisions (and score).
+    { temperature: 0, seed: 42 },
   )
 
   return safeParseDecisions(response.text)

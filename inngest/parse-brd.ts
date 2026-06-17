@@ -1,7 +1,8 @@
+import { createHash } from 'crypto'
 import { inngest } from '@/inngest/client'
 import { db } from '@/lib/db/prisma'
 import { extractTextFromStorage } from '@/lib/ai/text-extractor'
-import { extractArchitectureDecisions, decisionsToParsedBRD } from '@/lib/ai/brd-parser'
+import { extractArchitectureDecisions, decisionsToParsedBRD, normalizeDecisions } from '@/lib/ai/brd-parser'
 import { detectArchetype } from '@/lib/ai/archetype-detector'
 import { calculateArchitectureHealth } from '@/lib/ai/health-scorer'
 import { setJobState } from '@/lib/jobs/redis'
@@ -58,8 +59,35 @@ export const parseBRDJob = inngest.createFunction(
       return text
     })
 
-    // 2. Extract rich architecture decisions (with per-field confidence)
+    // Content hash of the raw text — identifies an identical re-parse of this BRD.
+    const brdHash = createHash('sha256').update(rawText).digest('hex').slice(0, 16)
+
+    // 2. Extract rich architecture decisions (with per-field confidence).
+    //    If this exact file was already parsed for this BRD record (same hash),
+    //    reuse the stored decisions so the health score is perfectly stable —
+    //    on top of greedy decoding (temperature 0 + seed) inside the extractor.
     const decisions = await step.run('parse-with-ai', async () => {
+      const existing = await db.bRD.findUnique({
+        where:  { id: brdId },
+        select: { parsedContent: true },
+      })
+      const prior = (existing?.parsedContent ?? null) as Record<string, unknown> | null
+
+      if (
+        prior &&
+        prior.brdHash === brdHash &&
+        prior.architectureDecisions != null &&
+        typeof prior.architectureDecisions === 'object'
+      ) {
+        await setJobState(projectId, {
+          status:  'running',
+          percent: 55,
+          step:    'parse-with-ai',
+          message: 'Reusing previous analysis (unchanged document)…',
+        })
+        return normalizeDecisions(prior.architectureDecisions as Record<string, unknown>)
+      }
+
       const result = await extractArchitectureDecisions(rawText)
       await setJobState(projectId, {
         status:  'running',
@@ -104,6 +132,7 @@ export const parseBRDJob = inngest.createFunction(
       const parsedContent = {
         ...parsedBRD,
         architectureDecisions: decisions,
+        brdHash,
       }
 
       await db.bRD.update({
