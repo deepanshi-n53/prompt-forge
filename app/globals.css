@@ -129,3 +129,18 @@
     @apply font-sans;
   }
 }
+
+/* Status-dot pulse — opacity 1 → 0.4 → 1 on a 1.5s loop (ProjectCard / banner) */
+@keyframes pulse-dot {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+
+.animate-pulse-dot {
+  animation: pulse-dot 1.5s ease-in-out infinite;
+}

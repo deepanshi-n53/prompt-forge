@@ -64,20 +64,40 @@ function MiniDial({ score }: { score: number }) {
 
 // ── status badge ──────────────────────────────────────────────────────────────
 
-const STATUS_STYLES: Record<string, string> = {
-  PROCESSING: 'bg-blue-50 text-blue-600 border-blue-200',
-  PARSED:     'bg-violet-50 text-violet-600 border-violet-200',
-  READY:      'bg-green-50 text-green-600 border-green-200',
-  ERROR:      'bg-red-50 text-red-600 border-red-200',
-  UPDATING:   'bg-amber-50 text-amber-600 border-amber-200',
+interface StatusMeta {
+  dot:   string
+  text:  (p: ProjectSummary) => string
+  pulse: boolean
+  href:  (id: string) => string
 }
 
-const STATUS_LABELS: Record<string, string> = {
-  PROCESSING: 'Processing',
-  PARSED:     'Parsed',
-  READY:      'Ready',
-  ERROR:      'Error',
-  UPDATING:   'Updating',
+// One entry per ProjectStatus. NOTE: the Prisma `ProjectStatus` enum currently has
+// no `PARSING` member — PROCESSING covers both "analysing the BRD" and "generating
+// prompts". PARSING is kept here for forward-compatibility only; it is never emitted
+// today, so a freshly-uploaded project shows "Generating…" while it is being parsed.
+const STATUS_META: Record<string, StatusMeta> = {
+  PROCESSING: { dot: 'bg-amber-500', pulse: true,  text: () => 'Generating…',                                                   href: (id) => `/project/${id}/generating?jobId=${id}` },
+  PARSING:    { dot: 'bg-amber-500', pulse: true,  text: () => 'Analysing BRD…',                                                href: (id) => `/project/${id}` },
+  UPDATING:   { dot: 'bg-amber-500', pulse: true,  text: () => 'Updating…',                                                     href: (id) => `/project/${id}/generating?jobId=${id}` },
+  READY:      { dot: 'bg-green-500', pulse: false, text: (p) => `${p.promptCount} section${p.promptCount !== 1 ? 's' : ''} ready`, href: (id) => `/project/${id}/prompts` },
+  PARSED:     { dot: 'bg-blue-500',  pulse: false, text: () => 'Ready to setup',                                                href: (id) => `/project/${id}/setup` },
+  ERROR:      { dot: 'bg-red-500',   pulse: false, text: () => 'Generation failed — click to retry',                            href: (id) => `/project/${id}/setup` },
+}
+
+function metaFor(project: ProjectSummary): StatusMeta {
+  return STATUS_META[project.status] ?? STATUS_META.PROCESSING
+}
+
+function StatusIndicator({ project }: { project: ProjectSummary }) {
+  const meta = metaFor(project)
+  return (
+    <span className="inline-flex items-center gap-1.5 text-xs font-medium text-zinc-600">
+      <span
+        className={cn('inline-flex h-2 w-2 rounded-full', meta.dot, meta.pulse && 'animate-pulse-dot')}
+      />
+      {meta.text(project)}
+    </span>
+  )
 }
 
 // ── card ──────────────────────────────────────────────────────────────────────
@@ -92,8 +112,14 @@ export function ProjectCard({ project }: ProjectCardProps) {
   const [dialogOpen, setDialogOpen] = useState(false)
 
   const healthScore = project.latestBrd?.healthScore ?? null
-  const statusStyle = STATUS_STYLES[project.status] ?? STATUS_STYLES.PROCESSING
-  const statusLabel = STATUS_LABELS[project.status] ?? project.status
+  const meta         = metaFor(project)
+  const primaryHref  = meta.href(project.id)
+  const primaryLabel =
+    project.status === 'PROCESSING' || project.status === 'UPDATING' ? 'View progress'
+    : project.status === 'READY' ? 'Open prompts'
+    : project.status === 'ERROR' ? 'Retry'
+    : project.status === 'PARSED' ? 'Start setup'
+    : 'Open'
 
   const updatedAt = new Date(project.updatedAt).toLocaleDateString('en-US', {
     month: 'short',
@@ -116,13 +142,19 @@ export function ProjectCard({ project }: ProjectCardProps) {
 
   return (
     <div className="group relative flex flex-col rounded-xl border border-zinc-200 bg-white p-5 shadow-sm transition-shadow hover:shadow-md">
+      {/* whole-card link — status-aware destination. Sits behind interactive
+          children (actions row is z-10), so Delete/buttons still work. */}
+      <Link
+        href={primaryHref}
+        aria-label={`Open ${project.name}`}
+        className="absolute inset-0 z-0 rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900"
+      />
+
       {/* header */}
-      <div className="flex items-start justify-between gap-3">
+      <div className="pointer-events-none relative z-10 flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${statusStyle}`}>
-              {statusLabel}
-            </span>
+            <StatusIndicator project={project} />
             {project.archetype && (
               <Badge variant="outline" className="capitalize">
                 {project.archetype.replace(/-/g, ' ')}
@@ -144,13 +176,13 @@ export function ProjectCard({ project }: ProjectCardProps) {
         <span>Updated {updatedAt}</span>
       </div>
 
-      {/* actions */}
-      <div className="mt-4 flex items-center gap-2">
+      {/* actions — above the whole-card overlay link so they stay clickable */}
+      <div className="relative z-10 mt-4 flex items-center gap-2">
         <Link
-          href={`/project/${project.id}`}
+          href={primaryHref}
           className={cn(buttonVariants({ size: 'sm' }), 'flex-1 text-center')}
         >
-          Open
+          {primaryLabel}
         </Link>
 
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>

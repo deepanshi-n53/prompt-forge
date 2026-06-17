@@ -3,10 +3,15 @@ import Link from 'next/link'
 import { db } from '@/lib/db/prisma'
 import { requireAuth } from '@/lib/auth'
 import { PromptBrowser } from './_components/PromptBrowser'
+import { PromptsLiveControls } from './_components/PromptsLiveControls'
 import { FirstPromptsSuccess } from '@/components/prompts/FirstPromptsSuccess'
 import type { PromptLayer } from './_components/PromptBrowser'
 import type { ParsedBRD } from '@/types/brd'
 import type { SectionDecision } from '@/types/decision'
+
+// Always read fresh from the DB — caching the RSC is what made a freshly-finished
+// project render with zero sections (stale pre-generation snapshot).
+export const dynamic = 'force-dynamic'
 
 export default async function PromptsPage({
   params,
@@ -23,7 +28,7 @@ export default async function PromptsPage({
   const [project, decisionRecord, activeBrd] = await Promise.all([
     db.project.findFirst({
       where: { id, ownerId: user.id },
-      select: { id: true, name: true, description: true, status: true, track: true, archetype: true },
+      select: { id: true, name: true, description: true, status: true, track: true, archetype: true, updatedAt: true },
     }),
     db.decisionGraph.findUnique({
       where: { projectId: id },
@@ -82,6 +87,14 @@ export default async function PromptsPage({
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
+      {/* Live polling while PROCESSING + a debug panel toggle */}
+      <PromptsLiveControls
+        projectId={id}
+        status={project.status}
+        sectionCount={prompts.length}
+        lastUpdated={project.updatedAt.toISOString()}
+      />
+
       {/* top bar */}
       <header className="flex shrink-0 items-center justify-between border-b border-zinc-200 bg-white px-6 py-3">
         <div className="flex items-center gap-3">
@@ -139,6 +152,23 @@ export default async function PromptsPage({
                 className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700"
               >
                 Retry from setup →
+              </Link>
+            </>
+          ) : project.status === 'READY' ? (
+            /* Finished, but nothing was saved — the dreaded "0 sections" case. */
+            <>
+              <div className="flex h-14 w-14 items-center justify-center rounded-full bg-amber-50 text-2xl">⚠</div>
+              <div>
+                <p className="text-sm font-semibold text-zinc-800">Generation completed but prompts are missing</p>
+                <p className="mt-1 text-xs text-zinc-400 max-w-xs mx-auto">
+                  The project is marked ready, but no sections were saved. Click to regenerate.
+                </p>
+              </div>
+              <Link
+                href={`/project/${id}/setup`}
+                className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700"
+              >
+                Regenerate →
               </Link>
             </>
           ) : (
