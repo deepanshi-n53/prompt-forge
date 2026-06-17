@@ -18,11 +18,15 @@ export interface PauseOption {
   description: string
 }
 
+export type PauseInputType = 'select' | 'multiselect' | 'text'
+
 export interface PauseQuestion {
   field:        string
   sectionNum:   string
+  sectionName?: string
   question:     string
   subtitle?:    string
+  inputType?:   PauseInputType
   options:      PauseOption[]
   defaultValue: string
 }

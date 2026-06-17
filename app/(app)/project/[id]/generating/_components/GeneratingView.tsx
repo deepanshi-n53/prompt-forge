@@ -189,8 +189,8 @@ export function GeneratingView({ projectId, jobId, isOnboarding = false }: Gener
   }, [progress.status, slow])
 
   // Track which pause question was answered (by field), NOT a one-shot boolean —
-  // a single generation can pause multiple times (§09, §20, §31), so we must
-  // re-show the modal for each distinct question.
+  // a single generation can pause multiple times (e.g. §06 MFA, §09 real-time,
+  // §12 payments, §20 compliance), so we must re-show the modal per question.
   const [answeredField, setAnsweredField] = useState<string | null>(null)
   const currentPauseField = progress.pauseQuestion?.field ?? null
 

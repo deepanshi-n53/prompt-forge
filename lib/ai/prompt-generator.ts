@@ -10,45 +10,81 @@ export interface GeneratedContent {
   assumptions: Assumption[]
 }
 
+// ── Locked-decision rendering ─────────────────────────────────────────────────
+
+function renderLocked(lockedDecisions?: Record<string, string>): string {
+  if (!lockedDecisions) return '  (none yet — this is the first section)'
+  const entries = Object.entries(lockedDecisions).filter(([, v]) => v != null && v !== '')
+  if (entries.length === 0) return '  (none yet — this is the first section)'
+  return entries.map(([k, v]) => `  - ${k}: ${v}`).join('\n')
+}
+
+function renderBRDContext(
+  parsedBRD: ParsedBRD,
+  locked: Record<string, string>,
+): string {
+  // Prefer the rich locked decisions (sourced from ArchitectureDecisions), then
+  // fall back to the legacy parsed BRD fields.
+  const appName  = locked.appName  || parsedBRD.productPurpose?.slice(0, 60) || 'this app'
+  const appType  = locked.appType  || parsedBRD.archetype || 'SaaS'
+  const platform = locked.platform || parsedBRD.platform || 'web'
+  const userTypes = locked.userTypes || (parsedBRD.userTypes ?? []).join(', ') || 'general users'
+  const coreFeatures = locked.coreFeatures
+    || (parsedBRD.coreFeatures ?? []).map((f) => f.name).join(', ')
+    || 'core product features'
+  const regions = locked.launchRegions || 'not specified'
+
+  const compliance = [
+    locked.gdprRequired === 'yes'  ? 'GDPR'    : null,
+    locked.hipaaRequired === 'yes' ? 'HIPAA'   : null,
+    locked.pciRequired === 'yes'   ? 'PCI-DSS' : null,
+  ].filter(Boolean).join(', ') || 'none flagged'
+
+  return [
+    `- App name: ${appName}`,
+    `- App type: ${appType}`,
+    `- Platform: ${platform}`,
+    `- User types: ${userTypes}`,
+    `- Core features: ${coreFeatures}`,
+    `- Launch regions: ${regions}`,
+    `- Compliance: ${compliance}`,
+  ].join('\n')
+}
+
 function buildSystem(
   sectionNum: string,
   sectionName: string,
+  parsedBRD: ParsedBRD,
   lockedDecisions?: Record<string, string>,
 ): string {
-  const appName = lockedDecisions?.productPurpose
-    ? lockedDecisions.productPurpose.slice(0, 60)
-    : 'this app'
-  const appType = lockedDecisions?.archetype ?? 'SaaS'
+  const locked = lockedDecisions ?? {}
 
-  const lockedList = lockedDecisions && Object.keys(lockedDecisions).length > 0
-    ? Object.entries(lockedDecisions)
-        .filter(([, v]) => v)
-        .map(([k, v]) => `  - ${k}: ${v}`)
-        .join('\n')
-    : '  (none yet — this is the first section)'
+  return `You are filling §${sectionNum} — ${sectionName} of the SaaS Architecture Prompt System.
 
-  return `You are filling in §${sectionNum} — ${sectionName} of the SaaS Architecture Prompt System for ${appName} (${appType}).
+LOCKED DECISIONS — NEVER CONTRADICT THESE:
+${renderLocked(lockedDecisions)}
 
-LOCKED DECISIONS — never contradict these:
-${lockedList}
+BRD CONTEXT:
+${renderBRDContext(parsedBRD, locked)}
 
 RULES:
-1. Fill EVERY ___ field with a specific real answer for THIS app — not a generic example
-2. Use exact app context — if this is a dog-walking app, say "walkers" not "service providers"
-3. Never contradict LOCKED DECISIONS above — they are final and set by earlier sections
-4. Never leave ___ blank — infer the best answer and label it as an assumption if needed
-5. Output ONLY the filled section text — no preamble, no meta-commentary
-6. Return ONLY valid JSON — no markdown fences, no prose outside the JSON
+1. Fill EVERY ___ blank with real, specific content for THIS exact app — never a generic placeholder.
+2. NEVER leave a ___ blank. If the BRD is silent, infer the best answer and record it as an assumption.
+3. NEVER contradict the LOCKED DECISIONS above — they are final, set by earlier sections.
+   - If §06 decided JWT, say "Bearer token" — not "auth token".
+   - If §07 decided PostgreSQL, never mention MongoDB.
+4. Use the real app vocabulary — if this is a dog-walking app, say "walkers", not "service providers".
+5. The "content" field must be ONLY the filled template text — every ___ replaced — with no preamble, no meta-commentary, no markdown fences.
 
-Response format (MUST be valid JSON):
+Return ONLY valid JSON (no markdown fences, no prose outside the JSON):
 {
-  "content": "the COMPLETE filled section text as a single string — include ALL headers and sub-sections from the template",
+  "content": "the COMPLETE filled section text — all headers and sub-sections from the template, every ___ replaced",
   "decisions": { "decisionKey": "specificValue" },
   "confidence": 0.85,
   "assumptions": [{ "field": "fieldName", "value": "assumed value", "confidence": "HIGH|MEDIUM|LOW", "reason": "why assumed" }]
 }
 
-The "decisions" object must contain only the key decisions this section locks in for subsequent sections.
+The "decisions" object must contain the key decisions THIS section locks in for every subsequent section.
 The "content" must be the full completed section — do NOT truncate or summarise.`
 }
 
@@ -105,26 +141,12 @@ export async function generateSection(
   const template = SECTION_TEMPLATES[sectionNum]
   if (!template) throw new Error(`No template found for section ${sectionNum}`)
 
-  const brdContext = {
-    archetype:         parsedBRD.archetype,
-    productPurpose:    parsedBRD.productPurpose,
-    userTypes:         parsedBRD.userTypes,
-    coreFeatures:      parsedBRD.coreFeatures?.slice(0, 10),
-    platform:          parsedBRD.platform,
-    complianceHints:   parsedBRD.complianceHints,
-    integrationHints:  parsedBRD.integrationHints,
-    scalingHints:      parsedBRD.scalingHints,
-    monetizationModel: parsedBRD.monetizationModel,
-  }
-
   const userMessage = [
-    `APP CONTEXT FROM BRD:\n${JSON.stringify(brdContext, null, 2)}`,
-    `USER SETUP ANSWERS:\n${JSON.stringify(userAnswers, null, 2)}`,
-    `SECTION TEMPLATE (§${sectionNum} — ${template.name}):\n${template.template}`,
+    `SECTION TEMPLATE (§${sectionNum} — ${template.name}) — preserve all structure, replace every ___:\n${template.template}`,
     `AGENT HINT — what to produce in the "content" field:\n${template.agentHint}`,
   ].join('\n\n---\n\n')
 
-  const systemPrompt = buildSystem(sectionNum, template.name, lockedDecisions)
+  const systemPrompt = buildSystem(sectionNum, template.name, parsedBRD, lockedDecisions)
 
   const response = await callAI(
     [
@@ -134,19 +156,5 @@ export async function generateSection(
     4096,
   )
 
-  try {
-    return safeParse(response.text)
-  } catch {
-    return {
-      content:    response.text,
-      decisions:  {},
-      confidence: 0.4,
-      assumptions: [{
-        field:      'parse_error',
-        value:      'raw-text',
-        reason:     'AI response was not valid JSON — content preserved verbatim',
-        confidence: 'LOW',
-      }],
-    }
-  }
+  return safeParse(response.text)
 }
