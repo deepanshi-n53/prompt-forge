@@ -6,6 +6,7 @@ import type { SectionTemplate } from '@/lib/ai/section-templates'
 import { sendPromptsReadyEmail } from '@/lib/email'
 import { setJobState } from '@/lib/jobs/redis'
 import { applyAnswersToDecisions, emptyDecisions, normalizeDecisions } from '@/lib/ai/brd-parser'
+import { applyArchitectureDefaults } from '@/lib/ai/architecture-defaults'
 import { Prisma, ProjectStatus, Track, PromptStatus } from '@prisma/client'
 import type { ArchitectureDecisions, ParsedBRD } from '@/types/brd'
 import type { DecisionGraph, SectionDecision } from '@/types/decision'
@@ -116,27 +117,15 @@ const PAUSE_SPECS: Record<string, PauseSpec> = {
     ],
     defaultValue: 'false',
   },
-  mfaRequired: {
-    question: 'Does your app require multi-factor authentication (MFA)?',
-    subtitle: 'Required for healthcare, fintech, or enterprise apps.',
+  hipaaRequired: {
+    question: 'Will this app store or process health / medical data (PHI)?',
+    subtitle: 'HIPAA reshapes the entire security architecture — encryption, audit logging, and access controls.',
     inputType: 'select',
     options: [
-      { value: 'true',  label: 'Yes — MFA required', description: 'Enforce a second factor (TOTP, SMS, or passkey)' },
-      { value: 'false', label: 'No — optional',       description: 'Password + social login is sufficient at launch' },
+      { value: 'true',  label: 'Yes — handles health data', description: 'Patient records, diagnoses, treatment, or other PHI' },
+      { value: 'false', label: 'No — no health data',        description: 'No protected health information is stored' },
     ],
     defaultValue: 'false',
-  },
-  paymentProvider: {
-    question: 'Which payment provider will you use?',
-    subtitle: 'Your core features suggest payments — this shapes §12 integrations and billing.',
-    inputType: 'select',
-    options: [
-      { value: 'Stripe',   label: 'Stripe',         description: 'Global cards, subscriptions, Connect for marketplaces' },
-      { value: 'Razorpay', label: 'Razorpay',       description: 'India-first — UPI, cards, netbanking' },
-      { value: 'PayPal',   label: 'PayPal',         description: 'PayPal balance + cards' },
-      { value: 'none',     label: 'Not needed yet', description: 'No payments at launch' },
-    ],
-    defaultValue: 'Stripe',
   },
   compliance: {
     question: 'Please confirm your compliance requirements. Which apply to your app?',
@@ -151,118 +140,11 @@ const PAUSE_SPECS: Record<string, PauseSpec> = {
     ],
     defaultValue: 'None',
   },
-  dbEngine: {
-    question: 'Which primary database should this app use?',
-    subtitle: 'No database preference was found in the BRD — this locks §05 and §07.',
-    inputType: 'select',
-    options: [
-      { value: 'PostgreSQL', label: 'PostgreSQL', description: 'Relational — the safe default for most apps' },
-      { value: 'MySQL',      label: 'MySQL',      description: 'Relational alternative' },
-      { value: 'MongoDB',    label: 'MongoDB',    description: 'Document store for flexible schemas' },
-      { value: 'SQLite',     label: 'SQLite',     description: 'Embedded — small or single-node apps' },
-    ],
-    defaultValue: 'PostgreSQL',
-  },
-  cacheLayer: {
-    question: 'Which caching layer should the app use?',
-    subtitle: 'No caching strategy was found in the BRD — this locks §05.',
-    inputType: 'select',
-    options: [
-      { value: 'Redis',     label: 'Redis',     description: 'In-memory cache + sessions + queues' },
-      { value: 'Memcached', label: 'Memcached', description: 'Lightweight in-memory cache' },
-      { value: 'none',      label: 'None',      description: 'No cache layer at launch' },
-    ],
-    defaultValue: 'Redis',
-  },
-  searchEngine: {
-    question: 'How should search be powered?',
-    subtitle: 'No search approach was found in the BRD — this locks §05.',
-    inputType: 'select',
-    options: [
-      { value: 'pg-fulltext',   label: 'Postgres full-text', description: 'Built-in — good enough for most apps' },
-      { value: 'Algolia',       label: 'Algolia',            description: 'Hosted, typo-tolerant instant search' },
-      { value: 'Elasticsearch', label: 'Elasticsearch',      description: 'Self-hosted, large-scale search' },
-      { value: 'none',          label: 'None',               description: 'No search at launch' },
-    ],
-    defaultValue: 'pg-fulltext',
-  },
-  apiStyle: {
-    question: 'Which API style should the backend expose?',
-    subtitle: 'No API style was found in the BRD — this locks §08.',
-    inputType: 'select',
-    options: [
-      { value: 'REST',    label: 'REST',    description: 'Resource endpoints — the broad default' },
-      { value: 'GraphQL', label: 'GraphQL', description: 'Single typed graph endpoint' },
-      { value: 'tRPC',    label: 'tRPC',    description: 'End-to-end typed RPC (TS-only stacks)' },
-    ],
-    defaultValue: 'REST',
-  },
-  multiTenant: {
-    question: 'Is this a multi-tenant (B2B) application?',
-    subtitle: 'No tenancy model was found in the BRD — this locks §05.',
-    inputType: 'select',
-    options: [
-      { value: 'true',  label: 'Yes — multi-tenant', description: 'Multiple organisations share one deployment' },
-      { value: 'false', label: 'No — single tenant', description: 'One pool of users, no org isolation' },
-    ],
-    defaultValue: 'false',
-  },
-  authMethod: {
-    question: 'Which authentication strategy should the app use?',
-    subtitle: 'No auth method was found in the BRD — this locks §06.',
-    inputType: 'select',
-    options: [
-      { value: 'JWT',           label: 'JWT (Bearer tokens)', description: 'Stateless bearer tokens' },
-      { value: 'sessions',      label: 'Server sessions',     description: 'Cookie-backed server sessions' },
-      { value: 'opaque-tokens', label: 'Opaque tokens',       description: 'Reference tokens checked server-side' },
-    ],
-    defaultValue: 'JWT',
-  },
-  platform: {
-    question: 'Which platform is this app for?',
-    subtitle: 'No platform was found in the BRD — this changes which sections are generated.',
-    inputType: 'select',
-    options: [
-      { value: 'web',    label: 'Web',           description: 'Browser-based app' },
-      { value: 'mobile', label: 'Mobile',        description: 'iOS / Android app' },
-      { value: 'both',   label: 'Web + mobile',  description: 'Both platforms' },
-    ],
-    defaultValue: 'web',
-  },
-  appType: {
-    question: 'What type of app is this?',
-    subtitle: 'No app type was found in the BRD — this anchors the whole architecture.',
-    inputType: 'select',
-    options: [
-      { value: 'b2b-saas',     label: 'B2B SaaS',     description: 'Business software, organisations as customers' },
-      { value: 'marketplace',  label: 'Marketplace',  description: 'Two-sided buyers + sellers' },
-      { value: 'ecommerce',    label: 'E-commerce',   description: 'Online store / catalogue + checkout' },
-      { value: 'consumer',     label: 'Consumer app', description: 'Direct-to-user product' },
-    ],
-    defaultValue: 'b2b-saas',
-  },
 }
 
-// Map the template-domain owns[] keys onto ArchitectureDecisions fields, so a
-// section whose owned decision is completely absent (confidence 0) can pause.
-const OWNED_TO_AD: Record<string, string> = {
-  dbEngine:     'dbEngine',
-  cacheLayer:   'cacheLayer',
-  searchEngine: 'searchEngine',
-  apiStyle:     'apiStyle',
-  multiTenant:  'multiTenant',
-  authModel:    'authMethod',
-  platform:     'platform',
-  appType:      'appType',
-}
-
-function paymentsLikely(d: ArchitectureDecisions): boolean {
-  if (['marketplace', 'ecommerce', 'fintech', 'booking'].includes(d.appType ?? '')) return true
-  const text = [...d.coreFeatures, ...d.coreUserJourneys].join(' ').toLowerCase()
-  return /pay|payment|checkout|subscrib|billing|purchase|\bbuy\b|\bsell\b|order|invoice|wallet|transaction/.test(text)
-}
-
-const BOOL_PAUSE_FIELDS = new Set(['needsRealtime', 'mfaRequired', 'multiTenant'])
+// Boolean pause answers render as Yes/No selects; their answer is normalised to
+// 'yes'/'no' in the flat locked map every section reads.
+const BOOL_PAUSE_FIELDS = new Set(['needsRealtime', 'hipaaRequired'])
 
 export const generatePromptsJob = inngest.createFunction(
   {
@@ -350,6 +232,12 @@ export const generatePromptsJob = inngest.createFunction(
       ? normalizeDecisions(decisionsRaw as Record<string, unknown>)
       : emptyDecisions()
 
+    // Fill every non-pausing architecture field the BRD + wizard left blank with a
+    // sensible default, so the cascade NEVER blocks on dbEngine/authMethod/etc.
+    // (confidence is left untouched, so the §09/§18 pauses can still fire). This is
+    // the seed for the flat locked map below.
+    decisions = applyArchitectureDefaults(decisions)
+
     // ── Step 2: Select sections in cascade order ──────────────────────────────
 
     const orderedNums = await step.run('select-sections', async () => {
@@ -384,34 +272,26 @@ export const generatePromptsJob = inngest.createFunction(
     let   completedIdx  = 0
 
     const conf = (field: string): number => decisions.confidence[field] ?? 0
-    const isEmpty = (field: string): boolean => {
-      const v = (decisions as unknown as Record<string, unknown>)[field]
-      return v == null || (Array.isArray(v) && v.length === 0)
-    }
 
-    // Decide which (single) pause, if any, this section needs before generating.
-    function pickPause(sectionNum: string, tmpl: SectionTemplate): string | null {
-      // Rule 2 — §20 ALWAYS confirms compliance.
+    // The ONLY three pauses that may ever block generation. Every other decision
+    // (dbEngine, authMethod, cacheLayer, …) resolves to ARCHITECTURE_DEFAULTS and
+    // continues — see lib/ai/architecture-defaults. Returns the pause field key
+    // (looked up in PAUSE_SPECS) or null to generate the section immediately.
+    function shouldPause(sectionNum: string): string | null {
+      // PAUSE 1 — §20 Compliance. ALWAYS confirm which regimes apply.
       if (sectionNum === '20' && !handled.has('compliance')) return 'compliance'
 
-      // Rule 1 — §09 real-time when unknown or low confidence.
-      if (sectionNum === '09' && !handled.has('needsRealtime') &&
-          (decisions.needsRealtime === null || conf('needsRealtime') < 0.5)) return 'needsRealtime'
+      // PAUSE 2 — §09 Real-time, ONLY when genuinely unknown (confidence < 0.5).
+      if (sectionNum === '09' && !handled.has('needsRealtime') && conf('needsRealtime') < 0.5)
+        return 'needsRealtime'
 
-      // Rule 3 — §06 MFA when unknown.
-      if (sectionNum === '06' && !handled.has('mfaRequired') &&
-          decisions.mfaRequired === null) return 'mfaRequired'
+      // PAUSE 3 — Security architecture, ONLY when HIPAA is genuinely unknown.
+      // NOTE: the spec calls this "§16 Security"; in THIS codebase §16 is rate
+      // limiting and §18 is the Security Architecture section that consumes
+      // hipaaRequired (encryption, audit logging), so the pause lives at §18.
+      if (sectionNum === '18' && !handled.has('hipaaRequired') && conf('hipaaRequired') < 0.5)
+        return 'hipaaRequired'
 
-      // Rule 4 — §12 payment provider when unknown but features imply payments.
-      if (sectionNum === '12' && !handled.has('paymentProvider') &&
-          decisions.paymentProvider === null && paymentsLikely(decisions)) return 'paymentProvider'
-
-      // Rule 5 — any owned field that is completely absent (confidence 0).
-      for (const owned of tmpl.owns ?? []) {
-        const adField = OWNED_TO_AD[owned]
-        if (!adField || handled.has(adField) || !PAUSE_SPECS[adField]) continue
-        if (isEmpty(adField) && conf(adField) === 0) return adField
-      }
       return null
     }
 
@@ -450,7 +330,7 @@ export const generatePromptsJob = inngest.createFunction(
       const pct = 15 + Math.round((completedIdx / totalSections) * 75)
 
       // ── Human pause checkpoint (at most one per section) ────────────────────
-      const pauseField = pickPause(sectionNum, tmpl)
+      const pauseField = shouldPause(sectionNum)
       if (pauseField) {
         const spec = PAUSE_SPECS[pauseField]
 

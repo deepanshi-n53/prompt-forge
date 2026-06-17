@@ -62,3 +62,16 @@ export async function getJobState(jobId: string): Promise<JobState | null> {
     return null
   }
 }
+
+// Remove a job's state entirely — used by /cancel so a stale `paused`/`running`
+// state can't re-surface a pause modal after the user backs out to setup.
+export async function clearJobState(jobId: string): Promise<void> {
+  const redis = getRedis()
+  if (!redis) return
+
+  try {
+    await redis.del(`job:${jobId}`)
+  } catch (err) {
+    console.warn('[jobs/redis] clearJobState failed', err)
+  }
+}

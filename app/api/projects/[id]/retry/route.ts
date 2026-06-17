@@ -1,10 +1,11 @@
 import { type NextRequest, NextResponse } from 'next/server'
-import { Track } from '@prisma/client'
+import { Prisma, Track } from '@prisma/client'
 import { db } from '@/lib/db/prisma'
 import { requireAuth } from '@/lib/auth'
 import { inngest } from '@/inngest/client'
 import { decisionsToWizardAnswers } from '@/lib/ai/decision-builder'
 import { emptyDecisions, normalizeDecisions } from '@/lib/ai/brd-parser'
+import { applyArchitectureDefaults } from '@/lib/ai/architecture-defaults'
 import { logger } from '@/lib/logger'
 
 type Context = { params: Promise<{ id: string }> }
@@ -51,14 +52,30 @@ export async function POST(_req: NextRequest, { params }: Context) {
   }
 
   // Reconstruct the same brd/answered payload the setup wizard produced, from the
-  // merged decisions already stored on the BRD.
+  // merged decisions already stored on the BRD — then fill every blank field with
+  // a default so a retry NEVER stalls on the same missing decision again.
   const parsedContent = (activeBrd.parsedContent ?? {}) as Record<string, unknown>
-  const decisions = parsedContent.architectureDecisions
+  const baseDecisions = parsedContent.architectureDecisions
     ? normalizeDecisions(parsedContent.architectureDecisions as Record<string, unknown>)
     : emptyDecisions()
+  const decisions = applyArchitectureDefaults(baseDecisions)
 
   const wizardAnswers = decisionsToWizardAnswers(decisions)
   const track = (decisions.track ?? project.track) as Track
+
+  // Persist the defaulted decisions back onto the BRD so setup + generation both
+  // see the same complete set, and wipe any partially-generated prompts so the
+  // cascade starts fresh rather than mixing old + new output.
+  await db.bRD.update({
+    where: { id: activeBrd.id },
+    data:  {
+      parsedContent: {
+        ...parsedContent,
+        architectureDecisions: decisions as unknown as Prisma.InputJsonValue,
+      } as unknown as Prisma.InputJsonValue,
+    },
+  })
+  await db.generatedPrompt.deleteMany({ where: { projectId: id } })
 
   await db.project.update({
     where: { id },
