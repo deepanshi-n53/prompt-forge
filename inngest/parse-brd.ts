@@ -1,9 +1,9 @@
 import { inngest } from '@/inngest/client'
 import { db } from '@/lib/db/prisma'
 import { extractTextFromStorage } from '@/lib/ai/text-extractor'
-import { parseBRDWithAI } from '@/lib/ai/brd-parser'
+import { extractArchitectureDecisions, decisionsToParsedBRD } from '@/lib/ai/brd-parser'
 import { detectArchetype } from '@/lib/ai/archetype-detector'
-import { calculateHealthScore } from '@/lib/ai/health-scorer'
+import { calculateArchitectureHealth } from '@/lib/ai/health-scorer'
 import { setJobState } from '@/lib/jobs/redis'
 import { Prisma, BRDStatus, ProjectStatus } from '@prisma/client'
 
@@ -58,9 +58,9 @@ export const parseBRDJob = inngest.createFunction(
       return text
     })
 
-    // 2. Parse with Claude AI
-    const parsedBRD = await step.run('parse-with-ai', async () => {
-      const result = await parseBRDWithAI(rawText)
+    // 2. Extract rich architecture decisions (with per-field confidence)
+    const decisions = await step.run('parse-with-ai', async () => {
+      const result = await extractArchitectureDecisions(rawText)
       await setJobState(projectId, {
         status:  'running',
         percent: 55,
@@ -70,9 +70,12 @@ export const parseBRDJob = inngest.createFunction(
       return result
     })
 
-    // 3. Calculate health score from parsed fields + raw text
+    // Legacy view consumed by archetype detection + prompt generation.
+    const parsedBRD = decisionsToParsedBRD(decisions)
+
+    // 3. Score BRD health across the 8 confidence-based dimensions
     const healthReport = await step.run('health-score', async () => {
-      const report = calculateHealthScore(parsedBRD, rawText)
+      const report = calculateArchitectureHealth(decisions)
       await setJobState(projectId, {
         status:  'running',
         percent: 72,
@@ -96,15 +99,37 @@ export const parseBRDJob = inngest.createFunction(
 
     // 5. Persist all parsed data and mark BRD as parsed
     await step.run('save-status', async () => {
+      // parsedContent keeps the legacy ParsedBRD shape (for prompt generation and
+      // the setup wizard) with the rich extraction embedded alongside it.
+      const parsedContent = {
+        ...parsedBRD,
+        architectureDecisions: decisions,
+      }
+
       await db.bRD.update({
         where: { id: brdId },
         data: {
           status: BRDStatus.PARSED,
-          parsedContent: parsedBRD as unknown as Prisma.InputJsonValue,
+          parsedContent: parsedContent as unknown as Prisma.InputJsonValue,
           healthScore: healthReport.total,
           healthDetail: healthReport as unknown as Prisma.InputJsonValue,
         },
       })
+
+      // Persist the rich decision set (with confidence) to the project's
+      // DecisionGraph so confidence-aware stages can read it directly.
+      await db.decisionGraph.upsert({
+        where: { projectId },
+        create: {
+          projectId,
+          decisions: decisions as unknown as Prisma.InputJsonValue,
+          version: 1,
+        },
+        update: {
+          decisions: decisions as unknown as Prisma.InputJsonValue,
+        },
+      })
+
       await db.project.update({
         where: { id: projectId },
         data: {

@@ -3,9 +3,9 @@ import { Track, Prisma } from '@prisma/client'
 import { db } from '@/lib/db/prisma'
 import { requireAuth } from '@/lib/auth'
 import { inngest } from '@/inngest/client'
-import { buildDecisionGraph, trackFromTimeline } from '@/lib/ai/decision-builder'
+import { buildDecisionGraph, decisionsToWizardAnswers } from '@/lib/ai/decision-builder'
+import { applyAnswersToDecisions, decisionsToParsedBRD, emptyDecisions, normalizeDecisions } from '@/lib/ai/brd-parser'
 import { answersSchema } from '@/lib/validations'
-import type { ParsedBRD } from '@/types/brd'
 
 type Context = { params: Promise<{ id: string }> }
 
@@ -47,14 +47,39 @@ export async function POST(request: NextRequest, { params }: Context) {
     return NextResponse.json({ error: parsed.error.issues.map((i) => i.message).join('; ') }, { status: 422 })
   }
 
-  const userAnswers = parsed.data
+  // Field-keyed gap answers (e.g. { multiTenant: 'true', paymentProvider: 'Stripe' }).
+  const userAnswers = parsed.data as Record<string, string | undefined>
   const activeBrd = project.brds[0] ?? null
-  const parsedBRD = (activeBrd?.parsedContent ?? {}) as unknown as ParsedBRD
 
-  // Build the merged decision graph
-  const { sections, track } = buildDecisionGraph(parsedBRD, userAnswers)
+  // 1. Load the rich decision set the parser extracted (embedded in parsedContent).
+  const parsedContent = (activeBrd?.parsedContent ?? {}) as Record<string, unknown>
+  const baseDecisions = parsedContent.architectureDecisions
+    ? normalizeDecisions(parsedContent.architectureDecisions as Record<string, unknown>)
+    : emptyDecisions()
 
-  // Upsert DecisionGraph
+  // 2. Merge user answers in at full confidence.
+  const mergedDecisions = applyAnswersToDecisions(baseDecisions, userAnswers)
+
+  // 3. Persist the merged decisions back onto the BRD (legacy view + rich view),
+  //    so both the generation pipeline and the setup screen reflect the answers.
+  const legacyBRD = decisionsToParsedBRD(mergedDecisions)
+  if (activeBrd) {
+    await db.bRD.update({
+      where: { id: activeBrd.id },
+      data: {
+        parsedContent: {
+          ...legacyBRD,
+          architectureDecisions: mergedDecisions,
+        } as unknown as Prisma.InputJsonValue,
+      },
+    })
+  }
+
+  // 4. Derive the legacy q1–q10 answers + section decision graph the generator needs.
+  const wizardAnswers = decisionsToWizardAnswers(mergedDecisions)
+  const { sections, track } = buildDecisionGraph(legacyBRD, wizardAnswers)
+  const newTrack = mergedDecisions.track ?? track
+
   const decisionGraph = await db.decisionGraph.upsert({
     where: { projectId: id },
     create: {
@@ -68,8 +93,6 @@ export async function POST(request: NextRequest, { params }: Context) {
     },
   })
 
-  // Determine track from Q3 answer and update project
-  const newTrack = userAnswers.q3 ? trackFromTimeline(userAnswers.q3) : track
   await db.project.update({
     where: { id },
     data: {
@@ -78,7 +101,7 @@ export async function POST(request: NextRequest, { params }: Context) {
     },
   })
 
-  // Fire the generate-prompts pipeline (non-blocking — log errors but don't fail the request)
+  // 5. Fire the generation pipeline (non-blocking — log but don't fail the request).
   try {
     await inngest.send({
       name: 'brd/answered',
@@ -87,7 +110,7 @@ export async function POST(request: NextRequest, { params }: Context) {
         brdId: activeBrd?.id ?? '',
         decisionGraphId: decisionGraph.id,
         track: newTrack,
-        userAnswers,
+        userAnswers: wizardAnswers,
       },
     })
   } catch (err) {

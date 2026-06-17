@@ -1,9 +1,9 @@
 import { notFound, redirect } from 'next/navigation'
 import { db } from '@/lib/db/prisma'
 import { requireAuth } from '@/lib/auth'
-import { buildWizardSetup } from '@/lib/ai/gap-analyzer'
+import { analyzeGaps, buildInsights, summarizeConfidence } from '@/lib/ai/gap-analyzer'
+import { emptyDecisions, normalizeDecisions } from '@/lib/ai/brd-parser'
 import { Wizard } from './_components/Wizard'
-import type { ParsedBRD } from '@/types/brd'
 
 export default async function SetupPage({
   params,
@@ -29,19 +29,26 @@ export default async function SetupPage({
 
   if (project.status === 'READY') redirect(`/project/${id}/prompts`)
 
-  const parsedBRD = (project.brds[0]?.parsedContent ?? null) as ParsedBRD | null
-  const wizardSetup = buildWizardSetup(parsedBRD)
+  // The rich decision set lives inside parsedContent (embedded by the parser).
+  // Fall back to an empty set for BRDs parsed before rich extraction existed.
+  const parsedContent = (project.brds[0]?.parsedContent ?? {}) as Record<string, unknown>
+  const decisions = parsedContent.architectureDecisions
+    ? normalizeDecisions(parsedContent.architectureDecisions as Record<string, unknown>)
+    : emptyDecisions()
+
+  const insightGroups = buildInsights(decisions)
+  const gapQuestions  = analyzeGaps(decisions)
+  const { confirmed, inferred, unknown } = summarizeConfidence(decisions)
 
   return (
     <Wizard
       projectId={id}
       projectName={project.name}
-      insightGroups={wizardSetup.insightGroups}
-      gapQuestions={wizardSetup.gapQuestions}
-      filledAnswers={wizardSetup.filledAnswers}
-      confirmed={wizardSetup.confirmed}
-      inferred={wizardSetup.inferred}
-      unknown={wizardSetup.unknown}
+      insightGroups={insightGroups}
+      gapQuestions={gapQuestions}
+      confirmed={confirmed}
+      inferred={inferred}
+      unknown={unknown}
     />
   )
 }

@@ -1,4 +1,4 @@
-import type { ParsedBRD, BRDHealthReport, HealthDimension } from '@/types'
+import type { ArchitectureDecisions, ParsedBRD, BRDHealthReport, HealthDimension } from '@/types'
 
 // --- keyword lists for raw-text signal checks ---
 
@@ -208,6 +208,61 @@ export function calculateHealthScore(
       const weight = Math.round((WEIGHTS[d.name] ?? 0) * 100)
       return `Add ${d.name} detail (${weight}% of total score): ${d.gaps[0]}`
     })
+
+  return { total, dimensions, gaps, recommendations }
+}
+
+// ── architecture health (confidence-based) ────────────────────────────────────
+// Scores the rich ArchitectureDecisions extraction across 8 dimensions. A field
+// "counts" only when it was extracted with confidence >= 0.7 (explicit or strongly
+// inferable). Each dimension = (confident fields / total fields) * 100; overall =
+// the unweighted average of the 8 dimensions.
+
+const CONFIDENCE_THRESHOLD = 0.7
+
+const HEALTH_DIMENSIONS: Record<string, (keyof ArchitectureDecisions)[]> = {
+  'Product clarity':      ['appName', 'appType', 'coreFeatures', 'userTypes'],
+  'Platform definition':  ['platform', 'coreUserJourneys'],
+  'Architecture signals': ['multiTenant', 'deploymentModel', 'cloudProvider'],
+  'Auth & security':      ['authMethod', 'mfaRequired', 'rbacRoles'],
+  'Data model':           ['dbEngine', 'cacheLayer'],
+  'Integration clarity':  ['paymentProvider', 'emailProvider', 'thirdPartyApis'],
+  'Compliance awareness': ['gdprRequired', 'hipaaRequired', 'pciRequired', 'launchRegions'],
+  'Scale & performance':  ['targetConcurrentUsers', 'uptimeSLA'],
+}
+
+// A field is "confident" when its confidence entry clears the threshold. Array
+// fields fall back to "non-empty" when no explicit confidence score was provided.
+function isConfident(field: keyof ArchitectureDecisions, d: ArchitectureDecisions): boolean {
+  const score = d.confidence[field as string]
+  if (typeof score === 'number') return score >= CONFIDENCE_THRESHOLD
+
+  const value = d[field]
+  if (Array.isArray(value)) return value.length > 0
+  return false
+}
+
+export function calculateArchitectureHealth(d: ArchitectureDecisions): BRDHealthReport {
+  const dimensions: HealthDimension[] = Object.entries(HEALTH_DIMENSIONS).map(([name, fields]) => {
+    const confident = fields.filter((f) => isConfident(f, d))
+    const score = Math.round((confident.length / fields.length) * 100)
+    const missing = fields.filter((f) => !isConfident(f, d))
+    const gaps =
+      missing.length > 0
+        ? [`Low confidence on: ${missing.join(', ')}`]
+        : []
+    return { name, score, gaps }
+  })
+
+  const total = Math.round(
+    dimensions.reduce((sum, dim) => sum + dim.score, 0) / dimensions.length,
+  )
+
+  const gaps = dimensions.filter((dim) => dim.score < 60).flatMap((dim) => dim.gaps)
+
+  const recommendations = dimensions
+    .filter((dim) => dim.score < 60)
+    .map((dim) => `Clarify ${dim.name} — ${dim.gaps[0] ?? 'add explicit detail to the BRD'}`)
 
   return { total, dimensions, gaps, recommendations }
 }

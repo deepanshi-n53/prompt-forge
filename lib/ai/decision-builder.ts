@@ -1,4 +1,4 @@
-import type { ParsedBRD } from '@/types/brd'
+import type { ArchitectureDecisions, ParsedBRD } from '@/types/brd'
 import type { SectionDecision } from '@/types/decision'
 
 export type UserAnswers = {
@@ -30,6 +30,66 @@ export const ANSWER_DEFAULTS: Record<string, string> = {
 
 export function trackFromTimeline(q3: string): 'FAST' | 'FULL' {
   return q3.startsWith('Under 4 weeks') ? 'FAST' : 'FULL'
+}
+
+// Bridge: derive the legacy q1–q10 wizard answers from a (post-merge) rich
+// decision set, so the untouched generation pipeline keeps its expected inputs.
+function scaleBucket(n: number | null): string {
+  if (n == null) return '1,000-10,000'
+  if (n < 1_000) return 'Under 1,000'
+  if (n < 10_000) return '1,000-10,000'
+  if (n < 100_000) return '10,000-100,000'
+  return '100,000+'
+}
+
+export function decisionsToWizardAnswers(d: ArchitectureDecisions): UserAnswers {
+  // q1 — billing model (from payment signals)
+  let q1 = 'Monthly subscription'
+  if (d.paymentProvider && d.paymentProvider !== 'none') {
+    q1 = d.needsPaymentSplit ? 'Per-transaction fee %' : 'Monthly subscription'
+  }
+
+  // q2 — launch region (kept compatible with complianceFlags GDPR detection)
+  let q2 = 'Single country'
+  const regionText = d.launchRegions.join(' ').toLowerCase()
+  if (/global|worldwide/.test(regionText)) q2 = 'Global from day 1'
+  else if (d.launchRegions.length > 1 || /eu|europe/.test(regionText)) q2 = 'Multiple countries'
+  if (d.gdprRequired && !/global|multiple/i.test(q2)) q2 = `${q2} — GDPR`
+
+  // q3 — timeline → track
+  const q3 = d.track === 'FAST' ? 'Under 4 weeks' : '3-6 months'
+
+  // q4 — sensitive data
+  const sensitive: string[] = []
+  const sensText = d.sensitiveDataTypes.join(' ').toLowerCase()
+  if (d.hipaaRequired || /health|medical|phi|patient/.test(sensText)) sensitive.push('Health/medical')
+  if (d.pciRequired || /financ|payment|card|bank/.test(sensText)) sensitive.push('Financial records')
+  if (/child|minor|coppa/.test(sensText)) sensitive.push('Children under 13')
+  if (/location|gps|geo/.test(sensText)) sensitive.push('Location tracking')
+  const q4 = sensitive.length ? sensitive.join(',') : 'None'
+
+  // q5 — year-one scale
+  const q5 = scaleBucket(d.targetConcurrentUsers)
+
+  // q6 — deployment target
+  const q6 = d.cloudProvider ?? 'Railway'
+
+  // q7 — multi-tenant
+  const q7 = d.multiTenant ? 'Yes — B2B multi-tenant' : 'No'
+
+  // q8 — auth method
+  let q8 = 'Email + social'
+  if (d.socialProviders.length > 0 && d.authMethod) q8 = 'Email + social'
+  else if (d.socialProviders.length > 0) q8 = 'Google / social only'
+  else if (d.authMethod) q8 = 'Email + password'
+
+  // q9 — database
+  const q9 = d.dbEngine ?? 'PostgreSQL'
+
+  // q10 — MFA policy
+  const q10 = d.mfaRequired ? 'Required for all users' : 'Optional for users'
+
+  return { q1, q2, q3, q4, q5, q6, q7, q8, q9, q10 }
 }
 
 function securityLevel(q4: string): 'STANDARD' | 'ELEVATED' | 'HIGH' {

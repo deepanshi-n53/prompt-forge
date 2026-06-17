@@ -1,16 +1,17 @@
 'use client'
 
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { cn } from '@/lib/utils'
 import type { InsightGroup, GapQuestion } from '@/lib/ai/gap-analyzer'
 
 // ── Confidence dot ────────────────────────────────────────────────────────────
+// green ≥ 0.9 (explicit) · amber 0.5–0.89 (inferred) · grey < 0.5 (unknown)
 
-function ConfidenceDot({ level }: { level: 'HIGH' | 'MEDIUM' | 'UNKNOWN' }) {
-  if (level === 'HIGH')    return <span className="mt-0.5 inline-block h-2 w-2 shrink-0 rounded-full bg-green-500" />
-  if (level === 'MEDIUM')  return <span className="mt-0.5 inline-block h-2 w-2 shrink-0 rounded-full bg-amber-400" />
-  return <span className="mt-0.5 inline-block h-2 w-2 shrink-0 rounded-full bg-zinc-300" />
+function ConfidenceDot({ confidence }: { confidence: number }) {
+  const color =
+    confidence >= 0.9 ? 'bg-green-500' : confidence >= 0.5 ? 'bg-amber-400' : 'bg-zinc-300'
+  return <span className={cn('mt-0.5 inline-block h-2 w-2 shrink-0 rounded-full', color)} />
 }
 
 // ── BRD Insights summary screen ───────────────────────────────────────────────
@@ -21,13 +22,15 @@ function InsightsSummary({
   confirmed,
   inferred,
   unknown,
+  submitting,
   onContinue,
 }: {
   insightGroups: InsightGroup[]
-  gapCount:  number
-  confirmed: number
-  inferred:  number
-  unknown:   number
+  gapCount:   number
+  confirmed:  number
+  inferred:   number
+  unknown:    number
+  submitting: boolean
   onContinue: () => void
 }) {
   return (
@@ -37,8 +40,10 @@ function InsightsSummary({
           What I understood from your BRD
         </h2>
         <p className="mb-5 text-xs text-zinc-400">
-          Extracted automatically from your document — review below, then answer{' '}
-          {gapCount === 0 ? 'no questions — everything is set!' : `${gapCount} question${gapCount !== 1 ? 's' : ''} to complete your setup`}
+          Extracted automatically from your document — review below
+          {gapCount === 0
+            ? '. Everything needed is set!'
+            : `, then answer ${gapCount} question${gapCount !== 1 ? 's' : ''} to fill the gaps.`}
         </p>
 
         <div className="grid gap-5 sm:grid-cols-2">
@@ -48,23 +53,23 @@ function InsightsSummary({
                 {group.title}
               </p>
               <div className="space-y-1.5">
-                {group.insights.map((insight) => (
-                  <div key={insight.label} className="flex items-start gap-2">
-                    <ConfidenceDot level={insight.confidence} />
-                    <div className="min-w-0">
-                      <span className="text-xs text-zinc-500">{insight.label}: </span>
-                      <span className={cn(
-                        'text-xs font-medium',
-                        insight.confidence === 'UNKNOWN' ? 'italic text-zinc-400' : 'text-zinc-800',
-                      )}>
-                        {insight.value}
-                      </span>
-                      {insight.reason && insight.confidence === 'MEDIUM' && (
-                        <span className="ml-1 text-[10px] text-zinc-400">({insight.reason})</span>
-                      )}
+                {group.insights.map((insight) => {
+                  const isUnknown = insight.value === 'Unknown' || insight.confidence < 0.5
+                  return (
+                    <div key={insight.field} className="flex items-start gap-2">
+                      <ConfidenceDot confidence={insight.confidence} />
+                      <div className="min-w-0">
+                        <span className="text-xs text-zinc-500">{insight.label}: </span>
+                        <span className={cn(
+                          'text-xs font-medium',
+                          isUnknown ? 'italic text-zinc-400' : 'text-zinc-800',
+                        )}>
+                          {insight.value}
+                        </span>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             </div>
           ))}
@@ -86,159 +91,197 @@ function InsightsSummary({
               {unknown} unknown
             </span>
           </div>
-          {gapCount > 0 && (
-            <p className="text-[10px] text-zinc-400">
-              {gapCount} gap{gapCount !== 1 ? 's' : ''} need{gapCount === 1 ? 's' : ''} your input
-            </p>
-          )}
         </div>
       </div>
 
       <div className="flex items-center justify-between">
         <p className="text-sm text-zinc-500">
           {gapCount === 0
-            ? 'Everything is set — ready to generate your architecture!'
+            ? 'Your BRD is detailed! Ready to generate.'
             : `${gapCount} quick question${gapCount !== 1 ? 's' : ''} left →`}
         </p>
         <button
           type="button"
           onClick={onContinue}
-          className="rounded-lg bg-zinc-900 px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-zinc-700"
+          disabled={submitting}
+          className={cn(
+            'rounded-lg px-5 py-2.5 text-sm font-semibold text-white transition-colors',
+            submitting ? 'cursor-not-allowed bg-zinc-400' : 'bg-zinc-900 hover:bg-zinc-700',
+          )}
         >
-          {gapCount === 0 ? 'Generate prompts →' : 'Review gaps and generate →'}
+          {submitting ? 'Saving…' : gapCount === 0 ? 'Generate prompts →' : 'Answer questions →'}
         </button>
       </div>
     </div>
   )
 }
 
-// ── Single question screen ────────────────────────────────────────────────────
+// ── Single gap question ───────────────────────────────────────────────────────
 
-function QuestionScreen({
+function QuestionField({
   question,
-  current,
-  step,
-  totalSteps,
-  onToggle,
-  onNext,
+  value,
+  onChange,
+}: {
+  question: GapQuestion
+  value:    string
+  onChange: (value: string) => void
+}) {
+  // boolean → Yes / No toggle
+  if (question.inputType === 'boolean') {
+    return (
+      <div className="flex gap-2">
+        {[{ v: 'true', label: 'Yes' }, { v: 'false', label: 'No' }].map((opt) => (
+          <button
+            key={opt.v}
+            type="button"
+            onClick={() => onChange(opt.v)}
+            className={cn(
+              'rounded-lg border px-4 py-2 text-sm font-medium transition-all',
+              value === opt.v
+                ? 'border-zinc-900 bg-zinc-900 text-white'
+                : 'border-zinc-200 bg-white text-zinc-700 hover:border-zinc-400',
+            )}
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
+    )
+  }
+
+  // select / multiselect → option buttons
+  if ((question.inputType === 'select' || question.inputType === 'multiselect') && question.options) {
+    const multi = question.inputType === 'multiselect'
+    const selected = value.split(',').map((s) => s.trim()).filter(Boolean)
+    const isSelected = (opt: string) => (multi ? selected.includes(opt) : value === opt)
+
+    function pick(opt: string) {
+      if (!multi) { onChange(opt); return }
+      const next = selected.includes(opt)
+        ? selected.filter((s) => s !== opt)
+        : [...selected, opt]
+      onChange(next.join(','))
+    }
+
+    return (
+      <div className="flex flex-wrap gap-2">
+        {question.options.map((opt) => (
+          <button
+            key={opt}
+            type="button"
+            onClick={() => pick(opt)}
+            className={cn(
+              'rounded-lg border px-3 py-1.5 text-sm font-medium transition-all',
+              isSelected(opt)
+                ? 'border-zinc-900 bg-zinc-900 text-white'
+                : 'border-zinc-200 bg-white text-zinc-700 hover:border-zinc-400',
+            )}
+          >
+            {opt}
+          </button>
+        ))}
+      </div>
+    )
+  }
+
+  // text
+  return (
+    <input
+      type="text"
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      placeholder={question.aiGuess ?? 'Type your answer…'}
+      className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-800 placeholder:text-zinc-400 focus:border-zinc-900 focus:outline-none"
+    />
+  )
+}
+
+// ── Grouped questions screen ──────────────────────────────────────────────────
+
+function QuestionsForm({
+  gapQuestions,
+  answers,
+  onChange,
   onBack,
-  onSkip,
-  isLast,
+  onSubmit,
   submitting,
   error,
 }: {
-  question:    GapQuestion
-  current:     string
-  step:        number
-  totalSteps:  number
-  onToggle:    (value: string) => void
-  onNext:      () => void
-  onBack:      () => void
-  onSkip:      () => void
-  isLast:      boolean
-  submitting:  boolean
-  error:       string
+  gapQuestions: GapQuestion[]
+  answers:    Record<string, string>
+  onChange:   (field: string, value: string) => void
+  onBack:     () => void
+  onSubmit:   () => void
+  submitting: boolean
+  error:      string
 }) {
-  function isSelected(value: string) {
-    if (!question.multiSelect) return current === value
-    return current.split(',').filter(Boolean).includes(value)
-  }
-
-  const canAdvance = current !== ''
+  // Preserve priority order while collapsing into section groups.
+  const grouped = useMemo(() => {
+    const order: string[] = []
+    const map = new Map<string, GapQuestion[]>()
+    for (const q of gapQuestions) {
+      if (!map.has(q.group)) { map.set(q.group, []); order.push(q.group) }
+      map.get(q.group)!.push(q)
+    }
+    return order.map((group) => ({ group, questions: map.get(group)! }))
+  }, [gapQuestions])
 
   return (
     <div className="w-full max-w-xl">
-      {/* progress */}
-      <div className="mb-8">
-        <div className="mb-2 flex items-center justify-between text-xs text-zinc-400">
-          <span>Question {step} of {totalSteps}</span>
-          <span>{Math.round((step / totalSteps) * 100)}% complete</span>
-        </div>
-        <div className="h-1.5 w-full rounded-full bg-zinc-100">
-          <div
-            className="h-1.5 rounded-full bg-zinc-900 transition-all duration-500"
-            style={{ width: `${(step / totalSteps) * 100}%` }}
-          />
-        </div>
+      <div className="mb-6">
+        <h1 className="text-xl font-bold text-zinc-900">A few gaps to fill</h1>
+        <p className="mt-1 text-sm text-zinc-500">
+          Your BRD didn’t cover these — answer what you can, skip the rest and we’ll use sensible defaults.
+        </p>
       </div>
 
-      {/* question */}
-      <div className="mb-4">
-        <h1 className="text-xl font-bold text-zinc-900">{question.title}</h1>
-        <p className="mt-1 text-sm text-zinc-500">{question.subtitle}</p>
-
-        {question.inferredValue && (
-          <div className="mt-2.5 inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs text-amber-700">
-            <span className="inline-block h-1.5 w-1.5 rounded-full bg-amber-400" />
-            AI inferred: <strong>{question.inferredValue}</strong>
-            {question.inferredReason && (
-              <span className="ml-0.5 text-amber-500">— {question.inferredReason}</span>
-            )}
+      <div className="space-y-8">
+        {grouped.map(({ group, questions }) => (
+          <div key={group}>
+            <p className="mb-3 text-[10px] font-semibold uppercase tracking-widest text-zinc-400">
+              {questions.length} question{questions.length !== 1 ? 's' : ''} · {group}
+            </p>
+            <div className="space-y-5">
+              {questions.map((q) => (
+                <div key={q.field} className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm">
+                  <p className="text-sm font-medium text-zinc-900">{q.question}</p>
+                  {q.aiGuess && (
+                    <div className="mt-1.5 inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5 text-[11px] text-amber-700">
+                      <span className="inline-block h-1.5 w-1.5 rounded-full bg-amber-400" />
+                      I inferred: <strong>{q.aiGuess}</strong>
+                    </div>
+                  )}
+                  <div className="mt-3">
+                    <QuestionField
+                      question={q}
+                      value={answers[q.field] ?? ''}
+                      onChange={(v) => onChange(q.field, v)}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
-        )}
+        ))}
       </div>
 
-      {/* options */}
-      <div className="mb-6 space-y-2.5">
-        {question.options.map((opt) => {
-          const selected   = isSelected(opt.value)
-          const isInferred = opt.value === question.inferredValue
-          return (
-            <button
-              key={opt.value}
-              type="button"
-              onClick={() => onToggle(opt.value)}
-              className={cn(
-                'w-full rounded-xl border px-4 py-3.5 text-left transition-all',
-                'hover:border-zinc-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900',
-                selected
-                  ? 'border-zinc-900 bg-zinc-900 text-white'
-                  : 'border-zinc-200 bg-white text-zinc-800',
-              )}
-            >
-              <div className="flex items-center justify-between">
-                <span className="block font-medium leading-snug">{opt.label}</span>
-                {isInferred && !selected && (
-                  <span className="rounded border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-600">
-                    AI pick
-                  </span>
-                )}
-              </div>
-              <span className={cn('mt-0.5 block text-xs', selected ? 'text-zinc-300' : 'text-zinc-400')}>
-                {opt.description}
-              </span>
-            </button>
-          )
-        })}
-      </div>
+      {error && <p className="mt-5 text-sm text-red-600">{error}</p>}
 
-      {error && <p className="mb-4 text-sm text-red-600">{error}</p>}
-
-      {/* actions */}
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          {step > 1 && (
-            <button type="button" onClick={onBack} className="text-sm text-zinc-500 hover:text-zinc-700">
-              ← Back
-            </button>
-          )}
-          <button type="button" onClick={onSkip} className="text-sm text-zinc-400 hover:text-zinc-600">
-            Skip (use {question.inferredValue ? 'AI pick' : 'default'})
-          </button>
-        </div>
-
+      <div className="mt-8 flex items-center justify-between">
+        <button type="button" onClick={onBack} className="text-sm text-zinc-500 hover:text-zinc-700">
+          ← Back
+        </button>
         <button
           type="button"
-          onClick={onNext}
-          disabled={!canAdvance || submitting}
+          onClick={onSubmit}
+          disabled={submitting}
           className={cn(
-            'rounded-lg px-5 py-2.5 text-sm font-semibold transition-colors',
-            canAdvance && !submitting
-              ? 'bg-zinc-900 text-white hover:bg-zinc-700'
-              : 'cursor-not-allowed bg-zinc-100 text-zinc-400',
+            'rounded-lg px-5 py-2.5 text-sm font-semibold text-white transition-colors',
+            submitting ? 'cursor-not-allowed bg-zinc-400' : 'bg-zinc-900 hover:bg-zinc-700',
           )}
         >
-          {submitting ? 'Saving…' : isLast ? 'Generate prompts →' : 'Next →'}
+          {submitting ? 'Saving…' : 'Generate prompts →'}
         </button>
       </div>
     </div>
@@ -252,7 +295,6 @@ interface WizardProps {
   projectName:   string
   insightGroups: InsightGroup[]
   gapQuestions:  GapQuestion[]
-  filledAnswers: Record<string, string>
   confirmed:     number
   inferred:      number
   unknown:       number
@@ -263,7 +305,6 @@ export function Wizard({
   projectName,
   insightGroups,
   gapQuestions,
-  filledAnswers,
   confirmed,
   inferred,
   unknown,
@@ -271,55 +312,24 @@ export function Wizard({
   const router = useRouter()
 
   const [phase, setPhase]           = useState<'summary' | 'questions'>('summary')
-  const [questionIdx, setQIdx]      = useState(0)
   const [answers, setAnswers]       = useState<Record<string, string>>({})
   const [submitting, setSubmitting] = useState(false)
   const [error, setError]           = useState('')
 
-  const totalQuestions = gapQuestions.length
-  const currentQ       = gapQuestions[questionIdx]
-  const currentAnswer  = answers[currentQ?.id ?? ''] ?? ''
+  const gapCount = gapQuestions.length
 
-  function toggle(value: string) {
-    if (!currentQ) return
-    if (!currentQ.multiSelect) {
-      setAnswers((prev) => ({ ...prev, [currentQ.id]: value }))
-      return
-    }
-    const arr = currentAnswer.split(',').filter(Boolean)
-    if (value === 'None') {
-      setAnswers((prev) => ({ ...prev, [currentQ.id]: 'None' }))
-      return
-    }
-    const next = arr.includes(value)
-      ? arr.filter((v) => v !== value)
-      : [...arr.filter((v) => v !== 'None'), value]
-    setAnswers((prev) => ({ ...prev, [currentQ.id]: next.join(',') }))
-  }
-
-  function skip() {
-    if (!currentQ) return
-    const fallback = currentQ.inferredValue ?? currentQ.defaultValue
-    setAnswers((prev) => ({ ...prev, [currentQ.id]: fallback }))
-    advance()
-  }
-
-  function advance() {
-    if (questionIdx < totalQuestions - 1) {
-      setQIdx((i) => i + 1)
-    } else {
-      void submit()
-    }
+  function setAnswer(field: string, value: string) {
+    setAnswers((prev) => ({ ...prev, [field]: value }))
   }
 
   async function submit() {
     setSubmitting(true)
     setError('')
 
-    // Merge: BRD-filled answers (background) + user answers (explicit choices win)
-    const payload: Record<string, string> = { ...filledAnswers }
-    for (const q of gapQuestions) {
-      payload[q.id] = answers[q.id] ?? q.inferredValue ?? q.defaultValue
+    // Only send fields the user actually answered — blanks keep their inferred value.
+    const payload: Record<string, string> = {}
+    for (const [field, value] of Object.entries(answers)) {
+      if (value != null && value.trim() !== '') payload[field] = value
     }
 
     const controller = new AbortController()
@@ -364,36 +374,27 @@ export function Wizard({
       {phase === 'summary' ? (
         <InsightsSummary
           insightGroups={insightGroups}
-          gapCount={totalQuestions}
+          gapCount={gapCount}
           confirmed={confirmed}
           inferred={inferred}
           unknown={unknown}
+          submitting={submitting}
           onContinue={() => {
-            if (totalQuestions === 0) {
-              void submit()
-            } else {
-              setPhase('questions')
-            }
+            if (gapCount === 0) void submit()
+            else setPhase('questions')
           }}
         />
-      ) : currentQ ? (
-        <QuestionScreen
-          question={currentQ}
-          current={currentAnswer}
-          step={questionIdx + 1}
-          totalSteps={totalQuestions}
-          onToggle={toggle}
-          onNext={advance}
-          onBack={() => {
-            if (questionIdx === 0) setPhase('summary')
-            else setQIdx((i) => i - 1)
-          }}
-          onSkip={skip}
-          isLast={questionIdx === totalQuestions - 1}
+      ) : (
+        <QuestionsForm
+          gapQuestions={gapQuestions}
+          answers={answers}
+          onChange={setAnswer}
+          onBack={() => setPhase('summary')}
+          onSubmit={submit}
           submitting={submitting}
           error={error}
         />
-      ) : null}
+      )}
     </div>
   )
 }
