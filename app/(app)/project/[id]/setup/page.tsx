@@ -4,6 +4,7 @@ import { requireAuth } from '@/lib/auth'
 import { analyzeGaps, buildInsights, summarizeConfidence } from '@/lib/ai/gap-analyzer'
 import { emptyDecisions, normalizeDecisions } from '@/lib/ai/brd-parser'
 import { Wizard } from './_components/Wizard'
+import { RetryBanner } from './_components/RetryBanner'
 
 export default async function SetupPage({
   params,
@@ -41,14 +42,17 @@ export default async function SetupPage({
   const { confirmed, inferred, unknown } = summarizeConfidence(decisions)
 
   return (
-    <Wizard
-      projectId={id}
-      projectName={project.name}
-      insightGroups={insightGroups}
-      gapQuestions={gapQuestions}
-      confirmed={confirmed}
-      inferred={inferred}
-      unknown={unknown}
-    />
+    <>
+      {project.status === 'ERROR' && <RetryBanner projectId={id} />}
+      <Wizard
+        projectId={id}
+        projectName={project.name}
+        insightGroups={insightGroups}
+        gapQuestions={gapQuestions}
+        confirmed={confirmed}
+        inferred={inferred}
+        unknown={unknown}
+      />
+    </>
   )
 }

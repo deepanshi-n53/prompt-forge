@@ -81,7 +81,7 @@ const STATUS_META: Record<string, StatusMeta> = {
   UPDATING:   { dot: 'bg-amber-500', pulse: true,  text: () => 'Updating…',                                                     href: (id) => `/project/${id}/generating?jobId=${id}` },
   READY:      { dot: 'bg-green-500', pulse: false, text: (p) => `${p.promptCount} section${p.promptCount !== 1 ? 's' : ''} ready`, href: (id) => `/project/${id}/prompts` },
   PARSED:     { dot: 'bg-blue-500',  pulse: false, text: () => 'Ready to setup',                                                href: (id) => `/project/${id}/setup` },
-  ERROR:      { dot: 'bg-red-500',   pulse: false, text: () => 'Generation failed — click to retry',                            href: (id) => `/project/${id}/setup` },
+  ERROR:      { dot: 'bg-red-500',   pulse: false, text: () => 'Generation failed',                                            href: (id) => `/project/${id}/setup` },
 }
 
 function metaFor(project: ProjectSummary): StatusMeta {

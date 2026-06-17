@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useJobProgress } from '@/hooks/useJobProgress'
 import { GenerationPauseModal } from '@/components/shared/GenerationPauseModal'
@@ -201,6 +201,58 @@ export function GeneratingView({ projectId, jobId, isOnboarding = false }: Gener
     : estimatedMinutes <= 1                          ? 'About 1 minute remaining'
     :                                                  `About ${estimatedMinutes} minutes remaining`
 
+  // ── Stuck detection ──────────────────────────────────────────────────────────
+  // Track the wall-clock time of the last forward progress (a section completing).
+  // If nothing advances for 4 minutes while still generating, surface a warning
+  // with an escape hatch — generation can silently stall on a slow AI response.
+  const STUCK_AFTER_MS = 240_000
+  const lastProgressAt = useRef<number>(Date.now())
+  const lastCompleted  = useRef<number>(0)
+  const [isStuck, setIsStuck] = useState(false)
+
+  const isActive = !isComplete && !isFailed && !isPaused
+
+  // Reset the stall timer whenever completedSections increases.
+  useEffect(() => {
+    if (completedSections > lastCompleted.current) {
+      lastCompleted.current = completedSections
+      lastProgressAt.current = Date.now()
+      setIsStuck(false)
+    }
+  }, [completedSections])
+
+  // Re-arm the timer when generation (re)starts so a finished/paused run never
+  // shows the warning.
+  useEffect(() => {
+    if (isActive) lastProgressAt.current = Date.now()
+    else setIsStuck(false)
+  }, [isActive])
+
+  // Poll every 30s — flip to stuck once we've gone STUCK_AFTER_MS without progress.
+  useEffect(() => {
+    if (!isActive) return
+    const t = setInterval(() => {
+      if (Date.now() - lastProgressAt.current > STUCK_AFTER_MS) setIsStuck(true)
+    }, 30_000)
+    return () => clearInterval(t)
+  }, [isActive])
+
+  // ── Cancel + retry escape route ──────────────────────────────────────────────
+  const [cancelling, setCancelling] = useState(false)
+
+  async function cancelAndRetry() {
+    setCancelling(true)
+    try {
+      await fetch(`/api/projects/${projectId}/cancel`, { method: 'POST' })
+    } catch { /* DB is set ERROR server-side regardless; still bail to setup */ }
+    router.push(`/project/${projectId}/setup`)
+  }
+
+  function waitLonger() {
+    lastProgressAt.current = Date.now()
+    setIsStuck(false)
+  }
+
   return (
     <div className="flex min-h-full flex-col items-center justify-center px-4 py-12">
       {/* Mid-generation pause modal */}
@@ -244,6 +296,35 @@ export function GeneratingView({ projectId, jobId, isOnboarding = false }: Gener
           </div>
         </div>
 
+        {/* stuck warning — appears above the progress bar after a 4-min stall */}
+        {isStuck && isActive && (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-left">
+            <p className="text-sm font-semibold text-amber-800">
+              ⚠ Generation seems stuck at {displayPercent}%
+            </p>
+            <p className="mt-1 text-xs text-amber-700">
+              This sometimes happens with slow AI responses.
+            </p>
+            <div className="mt-3 flex gap-2">
+              <button
+                type="button"
+                onClick={waitLonger}
+                className="rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-medium text-amber-800 hover:bg-amber-100"
+              >
+                Wait longer
+              </button>
+              <button
+                type="button"
+                onClick={cancelAndRetry}
+                disabled={cancelling}
+                className="rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-700 disabled:opacity-60"
+              >
+                {cancelling ? 'Cancelling…' : 'Cancel and retry'}
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* progress bar */}
         {!isFailed && (
           <div className="space-y-1">
@@ -281,7 +362,7 @@ export function GeneratingView({ projectId, jobId, isOnboarding = false }: Gener
                 onClick={() => router.push(`/project/${projectId}/setup`)}
                 className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
               >
-                ← Back to setup
+                Retry from setup →
               </button>
               <button
                 type="button"
@@ -301,6 +382,18 @@ export function GeneratingView({ projectId, jobId, isOnboarding = false }: Gener
               Generation runs in the background. You can safely close this tab and return later.
             </p>
           </div>
+        )}
+
+        {/* Always-available escape route while generating — never strand the user. */}
+        {isActive && (
+          <button
+            type="button"
+            onClick={cancelAndRetry}
+            disabled={cancelling}
+            className="text-xs text-zinc-400 underline underline-offset-2 hover:text-zinc-600 disabled:opacity-60"
+          >
+            {cancelling ? 'Cancelling…' : 'Taking too long? Cancel and retry from setup →'}
+          </button>
         )}
       </div>
     </div>

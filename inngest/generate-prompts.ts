@@ -270,6 +270,12 @@ export const generatePromptsJob = inngest.createFunction(
     retries:  3,
     timeouts: { finish: '15m' },
     triggers: [{ event: 'brd/answered' }],
+    // Let the cancel endpoint stop a stuck run: POST /cancel sends
+    // `generation/cancel` with the projectId, which aborts this run (including a
+    // waitForEvent pause) instead of leaving it hanging until the 15m timeout.
+    cancelOn: [
+      { event: 'generation/cancel', if: 'async.data.projectId == event.data.projectId' },
+    ],
     onFailure: async ({ event }) => {
       const { projectId } = (
         event.data as { event: { data: BRDAnsweredPayload } }
