@@ -8,6 +8,8 @@ import { setJobState } from '@/lib/jobs/redis'
 import { applyAnswersToDecisions, emptyDecisions, normalizeDecisions } from '@/lib/ai/brd-parser'
 import { getMidGenQuestion } from '@/lib/ai/gap-analyzer'
 import { CostMeter, addRunToTotal } from '@/lib/ai/cost-estimator'
+import { checkConsistency } from '@/lib/ai/consistency-checker'
+import { logger } from '@/lib/logger'
 import { Prisma, ProjectStatus, Track, PromptStatus } from '@prisma/client'
 import type { ArchitectureDecisions, ParsedBRD } from '@/types/brd'
 import type { DecisionGraph, SectionDecision } from '@/types/decision'
@@ -394,7 +396,37 @@ export const generatePromptsJob = inngest.createFunction(
       })
     })
 
-    // ── Step 5: Mark project READY ────────────────────────────────────────────
+    // ── Step 5: Consistency check (non-blocking) ──────────────────────────────
+    // Diagnostic only — cross-reference locked decisions against the generated
+    // prose and surface any problems. We do NOT block READY on this yet; the
+    // count is logged and carried through to the completion state for visibility.
+    const consistency = await step.run('consistency-check', async () => {
+      const prompts = await db.generatedPrompt.findMany({
+        where:  { projectId, brdVersion },
+        select: { sectionNum: true, content: true },
+      })
+      const sections: Record<string, string> = {}
+      for (const p of prompts) sections[p.sectionNum] = p.content
+
+      const problems = checkConsistency({
+        lockedDecisions,
+        sections,
+        expectedSections: orderedNums,
+      })
+
+      if (problems.length > 0) {
+        logger.warn(
+          { projectId, problemCount: problems.length, problems },
+          'Consistency check found problems (non-blocking)',
+        )
+      } else {
+        logger.info({ projectId }, 'Consistency check passed — no problems')
+      }
+
+      return { problemCount: problems.length }
+    })
+
+    // ── Step 6: Mark project READY ────────────────────────────────────────────
 
     await step.run('update-project', async () => {
       await db.project.update({
@@ -409,7 +441,7 @@ export const generatePromptsJob = inngest.createFunction(
       })
     })
 
-    // ── Step 6: Notify user ───────────────────────────────────────────────────
+    // ── Step 7: Notify user ───────────────────────────────────────────────────
 
     await step.run('notify-user', async () => {
       if (ownerEmail) {
@@ -418,7 +450,7 @@ export const generatePromptsJob = inngest.createFunction(
 
       await inngest.send({
         name: 'prompts/generated',
-        data: { projectId, sectionCount: orderedNums.length, track },
+        data: { projectId, sectionCount: orderedNums.length, track, consistencyProblems: consistency.problemCount },
       })
 
       await setJobState(projectId, {
@@ -426,10 +458,10 @@ export const generatePromptsJob = inngest.createFunction(
         percent: 100,
         step:    'done',
         message: 'All prompts are ready!',
-        result:  { projectId, sectionCount: orderedNums.length },
+        result:  { projectId, sectionCount: orderedNums.length, consistencyProblems: consistency.problemCount },
       })
     })
 
-    return { projectId, sectionsGenerated: orderedNums.length, track }
+    return { projectId, sectionsGenerated: orderedNums.length, track, consistencyProblems: consistency.problemCount }
   },
 )
