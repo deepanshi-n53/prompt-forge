@@ -1,4 +1,7 @@
+import { createHash } from 'crypto'
+import { Redis } from '@upstash/redis'
 import { callAI } from './ai-client'
+import { extractLocal, mergeExtractions, residualFields } from './local-extractor'
 import type { ArchitectureDecisions, Feature, ParsedBRD } from '@/types'
 
 // ── system prompt ─────────────────────────────────────────────────────────────
@@ -347,25 +350,104 @@ function mockDecisions(): ArchitectureDecisions {
   })
 }
 
+// ── content-hash cache (fail-open) ────────────────────────────────────────────
+// Identical BRD text → identical decisions, so extraction results are cached
+// keyed by a hash of the (trimmed) text. Mirrors the lib/jobs/redis.ts pattern:
+// a lazy Upstash singleton, with every Redis touch wrapped so an outage simply
+// falls back to parsing normally (fail open) instead of throwing.
+
+const EXTRACT_CACHE_TTL_SECONDS = 60 * 60 * 24 // 24h
+const MAX_EXTRACT_CHARS = 12_000
+
+let _redis: Redis | null | undefined = undefined
+
+function getRedis(): Redis | null {
+  if (_redis !== undefined) return _redis
+  if (!process.env.UPSTASH_REDIS_REST_URL || !process.env.UPSTASH_REDIS_REST_TOKEN) {
+    _redis = null
+    return null
+  }
+  try {
+    _redis = Redis.fromEnv()
+  } catch (err) {
+    console.warn('[brd-parser] Redis init failed — extraction cache disabled', err)
+    _redis = null
+  }
+  return _redis
+}
+
+function hashText(text: string): string {
+  return createHash('sha256').update(text).digest('hex')
+}
+
+async function getCachedDecisions(key: string): Promise<ArchitectureDecisions | null> {
+  const redis = getRedis()
+  if (!redis) return null
+  try {
+    const raw = await redis.get<unknown>(key)
+    if (raw == null) return null
+    // Re-normalise the stored value so the returned shape is guaranteed identical
+    // to a fresh parse, regardless of how Upstash deserialised it.
+    return normalizeDecisions(raw as Record<string, unknown>)
+  } catch (err) {
+    console.warn('[brd-parser] extraction cache read failed', err)
+    return null
+  }
+}
+
+async function setCachedDecisions(key: string, decisions: ArchitectureDecisions): Promise<void> {
+  const redis = getRedis()
+  if (!redis) return
+  try {
+    await redis.set(key, decisions, { ex: EXTRACT_CACHE_TTL_SECONDS })
+  } catch (err) {
+    console.warn('[brd-parser] extraction cache write failed', err)
+  }
+}
+
 // ── public API ────────────────────────────────────────────────────────────────
 
 // Rich extraction — the source of truth for confidence-aware downstream stages.
+// Local-first: cheap heuristics run before any AI call. If they cover everything,
+// the AI call is skipped; otherwise the AI fills the gaps and the two are merged
+// (higher confidence wins per field). Identical text is served from a cache.
 export async function extractArchitectureDecisions(rawText: string): Promise<ArchitectureDecisions> {
   if (process.env.AI_PROVIDER === 'mock') {
     return mockDecisions()
   }
 
-  const response = await callAI(
-    [
-      { role: 'system', content: SYSTEM_PROMPT },
-      { role: 'user', content: `Here is the BRD text. Extract all architectural decisions:\n\n${rawText.slice(0, 400_000)}` },
-    ],
-    4096,
-    // Greedy decoding so the same BRD always yields the same decisions (and score).
-    { temperature: 0, seed: 42 },
-  )
+  const trimmed = rawText.slice(0, MAX_EXTRACT_CHARS)
 
-  return safeParseDecisions(response.text)
+  // Cache hit on identical text → no extraction work at all.
+  const cacheKey = `brd-extract:${hashText(trimmed)}`
+  const cached = await getCachedDecisions(cacheKey)
+  if (cached) return cached
+
+  // Local heuristics first — they often pin named tech / compliance outright.
+  const local = extractLocal(trimmed)
+
+  let result: ArchitectureDecisions
+  if (residualFields(local).length === 0) {
+    // Nothing left to infer — skip the AI call entirely.
+    result = local
+  } else {
+    const response = await callAI(
+      [
+        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'user', content: `Here is the BRD text. Extract all architectural decisions:\n\n${trimmed}` },
+      ],
+      4096,
+      // Greedy decoding so the same BRD always yields the same decisions (and score).
+      { temperature: 0, seed: 42 },
+    )
+    const ai = safeParseDecisions(response.text)
+    // Higher-confidence value wins per field (explicit local hits beat AI guesses;
+    // AI fills everything local couldn't).
+    result = mergeExtractions(local, ai)
+  }
+
+  await setCachedDecisions(cacheKey, result)
+  return result
 }
 
 // Backwards-compatible entry point. Signature unchanged; now backed by the rich
