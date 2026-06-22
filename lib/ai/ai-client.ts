@@ -2,6 +2,20 @@ import Anthropic from '@anthropic-ai/sdk'
 import OpenAI from 'openai'
 import { Ollama } from 'ollama'
 
+// Startup guard — runs once at module load. Production must serve real,
+// hosted-model prompts: never fake ('mock') or a local model ('ollama'), and
+// never an unset provider (which would silently fall through to a default).
+// Fail fast and loud so a misconfigured deploy can't ship generic prompts.
+if (process.env.NODE_ENV === 'production') {
+  const provider = process.env.AI_PROVIDER
+  if (provider === 'mock' || provider === 'ollama' || !provider) {
+    throw new Error(
+      `Invalid AI_PROVIDER "${provider ?? '(unset)'}" in production. ` +
+        'Set AI_PROVIDER=openai (or anthropic) — mock and ollama are dev-only.',
+    )
+  }
+}
+
 interface AIMessage {
   role: 'system' | 'user' | 'assistant'
   content: string
