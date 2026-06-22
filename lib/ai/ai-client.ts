@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk'
 import OpenAI from 'openai'
 import { Ollama } from 'ollama'
+import type { TokenUsage } from './cost-estimator'
 
 // Startup guard — runs once at module load. Production must serve real,
 // hosted-model prompts: never fake ('mock') or a local model ('ollama'), and
@@ -23,11 +24,18 @@ interface AIMessage {
 
 interface AIResponse {
   text: string
+  // Real provider token counts when available — used for cost metering. Omitted
+  // by the mock provider, which has no usage; callers fall back to estimating.
+  usage?: TokenUsage
 }
 
 interface AICallOptions {
   temperature?: number
   seed?:        number
+  // Override the OpenAI model for this call (default 'gpt-4o'). Lets cheap,
+  // high-volume calls (section generation) run on a smaller model while BRD
+  // parsing / change detection stay on the default. Ignored by other providers.
+  model?:       string
 }
 
 export async function callAI(
@@ -49,14 +57,22 @@ export async function callAI(
   }
 
   if (provider === 'ollama') {
+    const ollamaModel = process.env.OLLAMA_MODEL ?? 'llama3.1:8b'
     const ollama = new Ollama({
       host: process.env.OLLAMA_BASE_URL ?? 'http://localhost:11434',
     })
     const response = await ollama.chat({
-      model:    process.env.OLLAMA_MODEL ?? 'llama3.1:8b',
+      model:    ollamaModel,
       messages: messages,
     })
-    return { text: response.message.content }
+    return {
+      text:  response.message.content,
+      usage: {
+        inputTokens:  response.prompt_eval_count ?? 0,
+        outputTokens: response.eval_count        ?? 0,
+        model:        ollamaModel,
+      },
+    }
   }
 
   if (provider === 'anthropic') {
@@ -65,8 +81,9 @@ export async function callAI(
     })
     const systemMsg    = messages.find((m) => m.role === 'system')?.content ?? ''
     const userMessages = messages.filter((m) => m.role !== 'system')
+    const anthropicModel = 'claude-sonnet-4-6'
     const response = await anthropic.messages.create({
-      model:      'claude-sonnet-4-6',
+      model:      anthropicModel,
       max_tokens: maxTokens,
       system:     systemMsg,
       ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
@@ -77,15 +94,21 @@ export async function callAI(
     })
     return {
       text: response.content[0].type === 'text' ? response.content[0].text : '',
+      usage: {
+        inputTokens:  response.usage.input_tokens,
+        outputTokens: response.usage.output_tokens,
+        model:        anthropicModel,
+      },
     }
   }
 
   // Default: OpenAI
+  const openaiModel = options.model ?? 'gpt-4o'
   const openai = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY,
   })
   const response = await openai.chat.completions.create({
-    model:      'gpt-4o',
+    model:      openaiModel,
     max_tokens: maxTokens,
     messages:   messages,
     // Greedy, reproducible decoding when the caller asks for it (e.g. BRD
@@ -93,5 +116,15 @@ export async function callAI(
     ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
     ...(options.seed !== undefined ? { seed: options.seed } : {}),
   })
-  return { text: response.choices[0].message.content ?? '' }
+  return {
+    text:  response.choices[0].message.content ?? '',
+    ...(response.usage ? {
+      usage: {
+        inputTokens:  response.usage.prompt_tokens,
+        outputTokens: response.usage.completion_tokens,
+        // Prefer the model the API echoes back; fall back to what we requested.
+        model:        response.model ?? openaiModel,
+      },
+    } : {}),
+  }
 }

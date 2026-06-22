@@ -117,6 +117,8 @@ model Project {
   archetype           String?
   archetypeConfidence Float?
   track               Track         @default(FAST)
+  aiCostCents      Int           @default(0) // accumulated AI spend across all runs, in cents
+  aiGenerationRuns Int           @default(0) // number of completed generation runs
   ownerId     String
   orgId       String?
   createdAt   DateTime      @default(now())

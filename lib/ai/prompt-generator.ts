@@ -2,12 +2,19 @@ import { callAI } from './ai-client'
 import { SECTION_TEMPLATES } from './section-templates'
 import type { ParsedBRD } from '@/types/brd'
 import type { DecisionGraph, Assumption } from '@/types/decision'
+import type { TokenUsage } from './cost-estimator'
 
 export interface GeneratedContent {
   content:     string
   decisions:   Record<string, string>
   confidence:  number
   assumptions: Assumption[]
+  // Cost-metering inputs, populated by generateSection (not by safeParse). usage
+  // is the provider's real token counts when available; promptChars/completionChars
+  // are the fallback used to estimate tokens when usage is absent.
+  usage?:           TokenUsage | null
+  promptChars?:     number
+  completionChars?: number
 }
 
 // ── Locked-decision rendering ─────────────────────────────────────────────────
@@ -154,7 +161,15 @@ export async function generateSection(
       { role: 'user',   content: userMessage },
     ],
     4096,
+    // Section generation is the highest-volume call by far — run it on the
+    // cheaper model. BRD parsing and change detection stay on the default.
+    { model: 'gpt-4o-mini' },
   )
 
-  return safeParse(response.text)
+  return {
+    ...safeParse(response.text),
+    usage:           response.usage ?? null,
+    promptChars:     systemPrompt.length + userMessage.length,
+    completionChars: response.text.length,
+  }
 }

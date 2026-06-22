@@ -67,7 +67,16 @@ export async function GET(_request: NextRequest, { params }: Context) {
     return NextResponse.json({ error: 'Project not found' }, { status: 404 })
   }
 
-  return NextResponse.json({ project })
+  // Surface the accumulated AI spend explicitly so the client doesn't have to
+  // know the raw column names. Cents is the source of truth (integer); usd is a
+  // convenience derived from it.
+  const cost = {
+    cents: project.aiCostCents,
+    usd:   project.aiCostCents / 100,
+    runs:  project.aiGenerationRuns,
+  }
+
+  return NextResponse.json({ project: { ...project, cost } })
 }
 
 export async function PATCH(request: NextRequest, { params }: Context) {

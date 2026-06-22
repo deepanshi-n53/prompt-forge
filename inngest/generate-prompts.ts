@@ -7,6 +7,7 @@ import { sendPromptsReadyEmail } from '@/lib/email'
 import { setJobState } from '@/lib/jobs/redis'
 import { applyAnswersToDecisions, emptyDecisions, normalizeDecisions } from '@/lib/ai/brd-parser'
 import { getMidGenQuestion } from '@/lib/ai/gap-analyzer'
+import { CostMeter, addRunToTotal } from '@/lib/ai/cost-estimator'
 import { Prisma, ProjectStatus, Track, PromptStatus } from '@prisma/client'
 import type { ArchitectureDecisions, ParsedBRD } from '@/types/brd'
 import type { DecisionGraph, SectionDecision } from '@/types/decision'
@@ -215,6 +216,13 @@ export const generatePromptsJob = inngest.createFunction(
     const handled       = new Set<string>()
     let   completedIdx  = 0
 
+    // One meter for the whole run. Each section's cost is folded in OUTSIDE the
+    // step callback (callbacks are memoized and don't re-run on replay), so the
+    // accumulation stays deterministic — mirroring the lockedDecisions cascade.
+    // No constructor model: each call is priced with the model it actually used
+    // (usage.model), so the gpt-4o-mini section calls are costed correctly.
+    const meter = new CostMeter()
+
     // Merge a mid-gen pause answer back into BOTH the rich decisions (for
     // confidence / dedupe) and the flat locked map (for downstream prompts), at
     // confidence 1.0. Handles a single-field pause (data.answer) and a
@@ -329,12 +337,17 @@ export const generatePromptsJob = inngest.createFunction(
           },
         })
 
-        // Return decisions so we can accumulate them OUTSIDE the callback
-        // (Inngest memoizes this return value, so it's available on replay too).
+        // Return decisions + cost-metering inputs so we can accumulate them
+        // OUTSIDE the callback (Inngest memoizes this return value, so it's
+        // available on replay too). usage is the provider's real token counts
+        // when available; promptChars/completionChars are the fallback estimate.
         return {
           sectionNum,
-          confidence: result.confidence,
-          decisions:  result.decisions ?? {},
+          confidence:      result.confidence,
+          decisions:       result.decisions ?? {},
+          usage:           result.usage ?? null,
+          promptChars:     result.promptChars ?? 0,
+          completionChars: result.completionChars ?? 0,
         }
       })
 
@@ -343,6 +356,15 @@ export const generatePromptsJob = inngest.createFunction(
       if (stepResult.decisions && Object.keys(stepResult.decisions).length > 0) {
         Object.assign(lockedDecisions, stepResult.decisions)
       }
+
+      // Meter this call's cost the same way — from the memoized return value, so
+      // the run total is identical on a fresh run and any replay. Prefers real
+      // usage; falls back to the char-count estimate when usage is absent (mock).
+      meter.meter({
+        usage:       stepResult.usage,
+        inputChars:  stepResult.promptChars,
+        outputChars: stepResult.completionChars,
+      })
 
       completedIdx++
       await setJobState(projectId, {
@@ -353,7 +375,26 @@ export const generatePromptsJob = inngest.createFunction(
       })
     }
 
-    // ── Step 4: Mark project READY ────────────────────────────────────────────
+    // ── Step 4: Persist this run's AI cost ────────────────────────────────────
+    // Fold the run total into the project's accumulated spend and count the run.
+    // Memoized step → runs exactly once, so the total isn't double-added on replay.
+    const runCents = meter.runTotalCents
+    await step.run('persist-cost', async () => {
+      const project = await db.project.findUnique({
+        where:  { id: projectId },
+        select: { aiCostCents: true },
+      })
+      const newTotal = addRunToTotal(project?.aiCostCents ?? 0, runCents)
+      await db.project.update({
+        where: { id: projectId },
+        data:  {
+          aiCostCents:      newTotal,
+          aiGenerationRuns: { increment: 1 },
+        },
+      })
+    })
+
+    // ── Step 5: Mark project READY ────────────────────────────────────────────
 
     await step.run('update-project', async () => {
       await db.project.update({
@@ -368,7 +409,7 @@ export const generatePromptsJob = inngest.createFunction(
       })
     })
 
-    // ── Step 5: Notify user ───────────────────────────────────────────────────
+    // ── Step 6: Notify user ───────────────────────────────────────────────────
 
     await step.run('notify-user', async () => {
       if (ownerEmail) {
