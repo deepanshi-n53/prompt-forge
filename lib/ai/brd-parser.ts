@@ -405,6 +405,27 @@ async function setCachedDecisions(key: string, decisions: ArchitectureDecisions)
   }
 }
 
+// The populated fields of a decision set: non-null scalars and non-empty arrays
+// (`confidence` is a metadata map, not a decision). Used both to summarise what
+// extraction found in logs and to decide whether a result is worth caching.
+function populatedFields(d: ArchitectureDecisions): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(d)) {
+    if (k === 'confidence' || v == null) continue
+    if (Array.isArray(v)) { if (v.length > 0) out[k] = v; continue }
+    if (typeof v === 'string' && v.trim() === '') continue
+    out[k] = v
+  }
+  return out
+}
+
+// True when extraction found at least one real decision. An all-null/empty result
+// is the symptom of a broken upstream run — never cache it, or the empty value
+// gets served back as a "hit" and every later parse of that text stays blank.
+function hasAnyDecision(d: ArchitectureDecisions): boolean {
+  return Object.keys(populatedFields(d)).length > 0
+}
+
 // ── public API ────────────────────────────────────────────────────────────────
 
 // Rich extraction — the source of truth for confidence-aware downstream stages.
@@ -412,6 +433,7 @@ async function setCachedDecisions(key: string, decisions: ArchitectureDecisions)
 // the AI call is skipped; otherwise the AI fills the gaps and the two are merged
 // (higher confidence wins per field). Identical text is served from a cache.
 export async function extractArchitectureDecisions(rawText: string): Promise<ArchitectureDecisions> {
+  console.log('>>> BRD PARSE using provider:', process.env.AI_PROVIDER)
   if (process.env.AI_PROVIDER === 'mock') {
     return mockDecisions()
   }
@@ -421,16 +443,23 @@ export async function extractArchitectureDecisions(rawText: string): Promise<Arc
   // Cache hit on identical text → no extraction work at all.
   const cacheKey = `brd-extract:${hashText(trimmed)}`
   const cached = await getCachedDecisions(cacheKey)
-  if (cached) return cached
+  if (cached) {
+    console.log('>>> BRD PARSE hit CACHE — populated fields:', populatedFields(cached))
+    return cached
+  }
+  console.log('>>> BRD PARSE ran FRESH (cache miss)')
 
   // Local heuristics first — they often pin named tech / compliance outright.
   const local = extractLocal(trimmed)
+  console.log('>>> BRD PARSE extractLocal result:', populatedFields(local))
 
   let result: ArchitectureDecisions
   if (residualFields(local).length === 0) {
     // Nothing left to infer — skip the AI call entirely.
+    console.log('>>> BRD PARSE resolved FULLY LOCALLY (no AI call)')
     result = local
   } else {
+    console.log('>>> BRD PARSE falling back to AI for residual fields:', residualFields(local))
     const response = await callAI(
       [
         { role: 'system', content: SYSTEM_PROMPT },
@@ -446,7 +475,14 @@ export async function extractArchitectureDecisions(rawText: string): Promise<Arc
     result = mergeExtractions(local, ai)
   }
 
-  await setCachedDecisions(cacheKey, result)
+  // Only cache a result that actually found something. Caching an all-null/empty
+  // result would serve it back as a "hit" and keep every later parse blank — the
+  // exact failure that motivated clearing the stale brd-extract:* keys.
+  if (hasAnyDecision(result)) {
+    await setCachedDecisions(cacheKey, result)
+  } else {
+    console.log('>>> BRD PARSE result is EMPTY/all-null — NOT caching')
+  }
   return result
 }
 

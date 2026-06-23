@@ -278,12 +278,23 @@ export const generatePromptsJob = inngest.createFunction(
           }),
         )
 
+        // Cap the wait so an unanswered pause never stalls the cascade. On
+        // timeout, waitForEvent resolves to null and we fall through to
+        // applyMidGenAnswer(q, null), which fills the field from its
+        // defaultValue / AI guess — generation always completes whether or not
+        // the user answers in time.
         const pauseEvent = await step.waitForEvent(`wait-${field}`, {
           event:   'brd/pause-answered',
-          timeout: '2h',
+          timeout: '90s',
           if:      `async.data.projectId == "${projectId}" && async.data.field == "${field}"`,
         })
 
+        if (pauseEvent === null) {
+          logger.info(
+            { projectId, sectionNum, field, defaultValue: q.defaultValue },
+            'Mid-gen pause timed out — proceeding with default value',
+          )
+        }
         applyMidGenAnswer(q, (pauseEvent?.data as Record<string, unknown> | null) ?? null)
         handled.add(field)
 
@@ -369,12 +380,22 @@ export const generatePromptsJob = inngest.createFunction(
       })
 
       completedIdx++
-      await setJobState(projectId, {
-        status:  'running',
-        percent: 15 + Math.round((completedIdx / totalSections) * 75),
-        step:    `generate-${sectionNum}`,
-        message: `§${sectionNum} complete (${completedIdx}/${totalSections})…`,
-      })
+      // Memoized so it runs exactly once per section. A RAW setJobState here is a
+      // replay hazard: on any Inngest re-invocation while the run is paused
+      // (waitForEvent pending), the live re-run of already-completed sections
+      // would write a 'running' frame AFTER the memoized (non-re-firing)
+      // pause-state frame, clobbering the stored pauseQuestion — so the client
+      // would never see the pause modal and the run would hang until timeout.
+      const donePercent = 15 + Math.round((completedIdx / totalSections) * 75)
+      const doneCount   = completedIdx
+      await step.run(`progress-${sectionNum}`, () =>
+        setJobState(projectId, {
+          status:  'running',
+          percent: donePercent,
+          step:    `generate-${sectionNum}`,
+          message: `§${sectionNum} complete (${doneCount}/${totalSections})…`,
+        }),
+      )
     }
 
     // ── Step 4: Persist this run's AI cost ────────────────────────────────────
