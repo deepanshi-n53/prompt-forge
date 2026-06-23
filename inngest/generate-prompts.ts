@@ -103,7 +103,11 @@ export const generatePromptsJob = inngest.createFunction(
   {
     id:       'generate-prompts',
     retries:  3,
-    timeouts: { finish: '15m' },
+    // Headroom for a full (~55-section) FULL-track run plus a few mid-gen pauses.
+    // Per-section time is now bounded by the dependency-scoped prompt (above), so
+    // the run no longer creeps toward this ceiling the way the old growing-context
+    // cascade did (which hit the previous 15m limit and got cancelled mid-run).
+    timeouts: { finish: '30m' },
     triggers: [{ event: 'brd/answered' }],
     // Let the cancel endpoint stop a stuck run: POST /cancel sends
     // `generation/cancel` with the projectId, which aborts this run (including a
@@ -221,6 +225,34 @@ export const generatePromptsJob = inngest.createFunction(
     const handled       = new Set<string>()
     let   completedIdx  = 0
 
+    // Per-section decisions, attributed to the section that emitted them, so a
+    // later section can be given ONLY the decisions from its dependency subgraph
+    // instead of the whole accumulated graph.
+    const sectionDecisions = new Map<string, Record<string, string>>()
+
+    // Resolve the transitive set of section numbers a section depends on by
+    // following each template's declared `depends`. Scoping each prompt to this
+    // subgraph (plus the fixed foundational seed) keeps prompt size roughly
+    // constant across the cascade — instead of growing every section, which made
+    // late sections multiple times slower and pushed the run past its timeout.
+    const templateByNum = new Map(allTemplates.map((t) => [t.num, t]))
+    const depScopeCache = new Map<string, string[]>()
+    function dependencyScope(num: string): string[] {
+      const cached = depScopeCache.get(num)
+      if (cached) return cached
+      const seen  = new Set<string>()
+      const stack = [...(templateByNum.get(num)?.depends ?? [])]
+      while (stack.length) {
+        const d = stack.pop()!
+        if (seen.has(d)) continue
+        seen.add(d)
+        stack.push(...(templateByNum.get(d)?.depends ?? []))
+      }
+      const out = [...seen]
+      depScopeCache.set(num, out)
+      return out
+    }
+
     // One meter for the whole run. Each section's cost is folded in OUTSIDE the
     // step callback (callbacks are memoized and don't re-run on replay), so the
     // accumulation stays deterministic — mirroring the lockedDecisions cascade.
@@ -317,9 +349,25 @@ export const generatePromptsJob = inngest.createFunction(
         )
       }
 
-      // Snapshot the full locked set BY VALUE — Inngest callbacks don't re-run on
-      // replay, so the snapshot must be captured at queue time.
-      const decisionsSnapshot = { ...lockedDecisions }
+      // Build this section's locked-decision context: the fixed foundational seed
+      // (app identity + the rich ArchitectureDecisions, incl. any pause answers)
+      // plus ONLY the decisions emitted by sections in this section's dependency
+      // subgraph — NOT the full accumulated graph. The seed already carries every
+      // cross-cutting choice the consistency checker guards (dbEngine, authMethod,
+      // apiStyle, cloudProvider, paymentProvider…), so contradictions are still
+      // prevented while prompt size stays roughly constant across the cascade.
+      // Snapshot BY VALUE — Inngest callbacks don't re-run on replay.
+      const seed: Record<string, string> = {
+        productPurpose:    parsedBRD.productPurpose    ?? '',
+        archetype:         parsedBRD.archetype         ?? '',
+        monetizationModel: parsedBRD.monetizationModel ?? '',
+        ...flattenDecisions(decisions),
+        track,
+      }
+      const decisionsSnapshot: Record<string, string> = { ...seed }
+      for (const dep of dependencyScope(sectionNum)) {
+        Object.assign(decisionsSnapshot, sectionDecisions.get(dep) ?? {})
+      }
 
       const stepResult = await step.run(`generate-${sectionNum}`, async () => {
         const result = await generateSection(
@@ -370,9 +418,12 @@ export const generatePromptsJob = inngest.createFunction(
       })
 
       // Accumulate the decisions this section locked in — runs on every invoke
-      // (fresh + replay) so downstream sections always get the full cascade.
+      // (fresh + replay). lockedDecisions stays the FULL cascade (the consistency
+      // checker cross-references all of it at the end); sectionDecisions keeps the
+      // same data attributed per-section so dependents can pull just their subgraph.
       if (stepResult.decisions && Object.keys(stepResult.decisions).length > 0) {
         Object.assign(lockedDecisions, stepResult.decisions)
+        sectionDecisions.set(sectionNum, stepResult.decisions)
       }
 
       // Meter this call's cost the same way — from the memoized return value, so
