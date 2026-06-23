@@ -433,7 +433,6 @@ function hasAnyDecision(d: ArchitectureDecisions): boolean {
 // the AI call is skipped; otherwise the AI fills the gaps and the two are merged
 // (higher confidence wins per field). Identical text is served from a cache.
 export async function extractArchitectureDecisions(rawText: string): Promise<ArchitectureDecisions> {
-  console.log('>>> BRD PARSE using provider:', process.env.AI_PROVIDER)
   if (process.env.AI_PROVIDER === 'mock') {
     return mockDecisions()
   }
@@ -443,23 +442,16 @@ export async function extractArchitectureDecisions(rawText: string): Promise<Arc
   // Cache hit on identical text → no extraction work at all.
   const cacheKey = `brd-extract:${hashText(trimmed)}`
   const cached = await getCachedDecisions(cacheKey)
-  if (cached) {
-    console.log('>>> BRD PARSE hit CACHE — populated fields:', populatedFields(cached))
-    return cached
-  }
-  console.log('>>> BRD PARSE ran FRESH (cache miss)')
+  if (cached) return cached
 
   // Local heuristics first — they often pin named tech / compliance outright.
   const local = extractLocal(trimmed)
-  console.log('>>> BRD PARSE extractLocal result:', populatedFields(local))
 
   let result: ArchitectureDecisions
   if (residualFields(local).length === 0) {
     // Nothing left to infer — skip the AI call entirely.
-    console.log('>>> BRD PARSE resolved FULLY LOCALLY (no AI call)')
     result = local
   } else {
-    console.log('>>> BRD PARSE falling back to AI for residual fields:', residualFields(local))
     const response = await callAI(
       [
         { role: 'system', content: SYSTEM_PROMPT },
@@ -480,8 +472,6 @@ export async function extractArchitectureDecisions(rawText: string): Promise<Arc
   // exact failure that motivated clearing the stale brd-extract:* keys.
   if (hasAnyDecision(result)) {
     await setCachedDecisions(cacheKey, result)
-  } else {
-    console.log('>>> BRD PARSE result is EMPTY/all-null — NOT caching')
   }
   return result
 }

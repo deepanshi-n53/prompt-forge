@@ -43,7 +43,6 @@ export async function callAI(
   maxTokens: number = 4000,
   options: AICallOptions = {},
 ): Promise<AIResponse> {
-  console.log('>>> AI CALL using provider:', process.env.AI_PROVIDER)
   const provider = process.env.AI_PROVIDER ?? 'openai'
 
   if (provider === 'mock') {
