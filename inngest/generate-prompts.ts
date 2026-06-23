@@ -162,7 +162,9 @@ export const generatePromptsJob = inngest.createFunction(
 
         await setJobState(projectId, {
           status:  'running',
-          percent: 10,
+          // Planning step — no sections generated yet, so 0%. The bar tracks
+          // generated sections only (0% at start → 100% when all are done).
+          percent: 0,
           step:    'load-decisions',
           message: 'Loading project data…',
         })
@@ -193,7 +195,8 @@ export const generatePromptsJob = inngest.createFunction(
 
       await setJobState(projectId, {
         status:  'running',
-        percent: 15,
+        // Still planning — 0% until the first section is generated.
+        percent: 0,
         step:    'select-sections',
         message: `Planning ${selected.length} architecture sections in cascade order…`,
       })
@@ -253,7 +256,9 @@ export const generatePromptsJob = inngest.createFunction(
       const tmpl = allTemplates.find(t => t.num === sectionNum)
       if (!tmpl) continue
 
-      const pct = 15 + Math.round((completedIdx / totalSections) * 75)
+      // Progress = sections generated so far / total. 0% before the first
+      // section completes, 100% after the last — planning steps don't count.
+      const pct = Math.round((completedIdx / totalSections) * 100)
 
       // ── Human pause checkpoints ─────────────────────────────────────────────
       // A section may need more than one answer (e.g. §09 asks needsRealtime, then
@@ -386,7 +391,7 @@ export const generatePromptsJob = inngest.createFunction(
       // would write a 'running' frame AFTER the memoized (non-re-firing)
       // pause-state frame, clobbering the stored pauseQuestion — so the client
       // would never see the pause modal and the run would hang until timeout.
-      const donePercent = 15 + Math.round((completedIdx / totalSections) * 75)
+      const donePercent = Math.round((completedIdx / totalSections) * 100)
       const doneCount   = completedIdx
       await step.run(`progress-${sectionNum}`, () =>
         setJobState(projectId, {
@@ -456,7 +461,9 @@ export const generatePromptsJob = inngest.createFunction(
       })
       await setJobState(projectId, {
         status:  'running',
-        percent: 95,
+        // All sections generated → 100%. This is post-generation finalisation,
+        // so the bar stays full rather than regressing from the last section.
+        percent: 100,
         step:    'update-project',
         message: 'Finalising…',
       })
