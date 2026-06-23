@@ -422,7 +422,9 @@ function populatedFields(d: ArchitectureDecisions): Record<string, unknown> {
 // True when extraction found at least one real decision. An all-null/empty result
 // is the symptom of a broken upstream run — never cache it, or the empty value
 // gets served back as a "hit" and every later parse of that text stays blank.
-function hasAnyDecision(d: ArchitectureDecisions): boolean {
+// Also used by the setup page to choose between the BRD's embedded decisions and
+// the DecisionGraph, preferring whichever is actually populated.
+export function hasAnyDecision(d: ArchitectureDecisions): boolean {
   return Object.keys(populatedFields(d)).length > 0
 }
 
