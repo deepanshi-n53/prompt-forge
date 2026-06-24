@@ -42,11 +42,6 @@ export async function GET(_request: NextRequest, { params }: Context) {
     },
   })
 
-  console.log(
-    `[prompts:${projectId}] status=${project.status} rows=${prompts.length}`,
-    prompts.map((p) => p.sectionNum),
-  )
-
   // Generation says it finished but no prompts exist — surface a clear error
   // instead of silently rendering an empty page.
   if (prompts.length === 0 && project.status === 'READY') {

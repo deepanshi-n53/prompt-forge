@@ -66,7 +66,6 @@ export async function GET(request: NextRequest, { params }: Context) {
           if (!state) return false
 
           if (state.updatedAt > lastSentAt) {
-            const firstFrame = lastSentAt === 0
             lastSentAt = state.updatedAt
             const payload = JSON.stringify({
               status:    state.status,
@@ -79,10 +78,6 @@ export async function GET(request: NextRequest, { params }: Context) {
               ...(state.pauseQuestion !== undefined ? { pauseQuestion: state.pauseQuestion } : {}),
             })
             enqueue(`id: ${state.updatedAt}\ndata: ${payload}\n\n`)
-            if (firstFrame) {
-              console.log('[SSE] Connected, current state:', state.status,
-                          'pauseQuestion:', !!state.pauseQuestion)
-            }
           }
 
           if (state.status === 'complete' || state.status === 'failed') {

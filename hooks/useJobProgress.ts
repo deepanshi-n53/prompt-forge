@@ -49,14 +49,10 @@ export function useJobProgress(jobId: string | null): JobProgress {
 
     // Apply a frame only if it is newer than the last one we showed. Frames
     // without an updatedAt (shouldn't happen) are always applied.
-    function applyIfNewer(next: JobFrame, source: 'sse' | 'poll') {
+    function applyIfNewer(next: JobFrame) {
       const at = next.updatedAt
       if (at != null && at <= lastAtRef.current) return
       if (at != null) lastAtRef.current = at
-
-      if (next.status === 'paused' && next.pauseQuestion) {
-        console.log('[PAUSE] Modal triggered by:', source, '— field:', next.pauseQuestion.field)
-      }
 
       progressRef.current = next
       setProgress(next)
@@ -76,7 +72,7 @@ export function useJobProgress(jobId: string | null): JobProgress {
         const res = await fetch(`/api/jobs/${jobId}`)
         if (!res.ok || done) return
         const { state } = (await res.json()) as { state: JobFrame | null }
-        if (state && !done) applyIfNewer(state, 'poll')
+        if (state && !done) applyIfNewer(state)
       } catch { /* network hiccup — next tick retries */ }
     }
 
@@ -90,7 +86,7 @@ export function useJobProgress(jobId: string | null): JobProgress {
       es.onmessage = (event) => {
         if (done) { es?.close(); return }
         try {
-          applyIfNewer(JSON.parse(event.data) as JobFrame, 'sse')
+          applyIfNewer(JSON.parse(event.data) as JobFrame)
         } catch { /* malformed frame — ignore */ }
       }
 
