@@ -16,8 +16,8 @@ const POLL_MS = 10_000
 // any project still generating (status === PROCESSING). Polls /api/projects every
 // 10s and auto-dismisses when nothing is in flight. No external deps.
 export function GenerationBanner() {
-  const [active, setActive]       = useState<ActiveProject[]>([])
-  const [dismissedId, setDismissedId] = useState<string | null>(null)
+  const [active, setActive]             = useState<ActiveProject[]>([])
+  const [dismissedKey, setDismissedKey] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -55,32 +55,42 @@ export function GenerationBanner() {
   if (active.length === 0) return null
 
   // Most recently started generation first (API already orders by updatedAt desc).
-  const first = [...active].sort(
+  const running = [...active].sort(
     (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
-  )[0]
-  const more = active.length - 1
+  )
 
-  // Dismissed — stays hidden until a *different* generation becomes the active one.
-  if (dismissedId === first.id) return null
+  // Dismissal is keyed to the exact set of running generations, so the banner
+  // re-appears whenever a new run starts or one finishes — not just when the
+  // single "top" project changes.
+  const key = running.map((p) => p.id).join(',')
+  if (dismissedKey === key) return null
+
+  const label = running.length === 1 ? 'Generating prompts for' : `Generating ${running.length} projects:`
 
   return (
     <div className="sticky top-0 z-30 flex h-9 items-center justify-center gap-2 border-b border-amber-200 bg-amber-50 px-4 text-xs font-medium text-amber-800">
       {/* pulsing dot */}
-      <span className="inline-flex h-2 w-2 animate-pulse-dot rounded-full bg-amber-500" />
-      <span className="truncate">
-        ⚡ Generating prompts for <strong>{first.name}</strong>
-        {more > 0 && ` +${more} more`}
+      <span className="inline-flex h-2 w-2 shrink-0 animate-pulse-dot rounded-full bg-amber-500" />
+
+      <span className="flex min-w-0 items-center gap-1.5 truncate">
+        <span className="shrink-0">⚡ {label}</span>
+        {running.map((p, i) => (
+          <span key={p.id} className="flex min-w-0 items-center gap-1.5">
+            {i > 0 && <span aria-hidden className="shrink-0 text-amber-400">·</span>}
+            <Link
+              href={`/project/${p.id}/generating?jobId=${p.id}`}
+              className="truncate font-semibold underline underline-offset-2 hover:text-amber-900"
+            >
+              {p.name}
+            </Link>
+          </span>
+        ))}
       </span>
-      <Link
-        href={`/project/${first.id}/generating?jobId=${first.id}`}
-        className="ml-1 shrink-0 underline underline-offset-2 hover:text-amber-900"
-      >
-        View progress →
-      </Link>
+
       <button
         type="button"
         aria-label="Dismiss"
-        onClick={() => setDismissedId(first.id)}
+        onClick={() => setDismissedKey(key)}
         className="absolute right-3 text-amber-500 hover:text-amber-800"
       >
         ✕
