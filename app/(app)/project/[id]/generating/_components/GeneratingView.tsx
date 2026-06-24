@@ -283,7 +283,7 @@ export function GeneratingView({ projectId, jobId, isOnboarding = false }: Gener
                 : 'text-zinc-900',
               )}
             >
-              {isFailed   ? 'Generation failed'
+              {isFailed   ? 'Generation stopped'
               : isComplete ? 'Architecture ready!'
               : isPaused   ? 'Waiting for your answer…'
               : 'Generating your architecture…'}

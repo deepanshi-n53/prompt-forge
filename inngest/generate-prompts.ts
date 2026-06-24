@@ -4,7 +4,7 @@ import { generateSection } from '@/lib/ai/prompt-generator'
 import { getTemplatesForTrack } from '@/lib/ai/section-templates'
 import type { SectionTemplate } from '@/lib/ai/section-templates'
 import { sendPromptsReadyEmail } from '@/lib/email'
-import { setJobState } from '@/lib/jobs/redis'
+import { setJobState, setRunProject } from '@/lib/jobs/redis'
 import { applyAnswersToDecisions, emptyDecisions, normalizeDecisions } from '@/lib/ai/brd-parser'
 import { getMidGenQuestion } from '@/lib/ai/gap-analyzer'
 import { CostMeter, addRunToTotal } from '@/lib/ai/cost-estimator'
@@ -138,11 +138,16 @@ export const generatePromptsJob = inngest.createFunction(
       ])
     },
   },
-  async ({ event, step }) => {
+  async ({ event, step, runId }) => {
     const { projectId, brdId, track: trackRaw, userAnswers } =
       event.data as BRDAnsweredPayload
 
     const track = trackRaw === 'FAST' ? 'FAST' : 'FULL'
+
+    // Record run → project so the cancellation-cleanup function can map an
+    // `inngest/function.cancelled` event (which carries only run_id) back to this
+    // project and flip it out of PROCESSING. Memoized so it runs once.
+    await step.run('register-run', () => setRunProject(runId, projectId))
 
     // ── Step 1: Load project data ─────────────────────────────────────────────
 

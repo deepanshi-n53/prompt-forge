@@ -75,3 +75,34 @@ export async function clearJobState(jobId: string): Promise<void> {
     console.warn('[jobs/redis] clearJobState failed', err)
   }
 }
+
+// ── Run → project bridge ──────────────────────────────────────────────────────
+// An `inngest/function.cancelled` event carries only function_id + run_id, NOT
+// the original projectId. generate-prompts records this mapping at run start so
+// the cancellation-cleanup function can resolve a cancelled run back to its
+// project and flip it out of PROCESSING. TTL outlives the run's finish timeout.
+
+const RUN_MAP_TTL_SECONDS = 2 * 3600 // 2h
+
+export async function setRunProject(runId: string, projectId: string): Promise<void> {
+  const redis = getRedis()
+  if (!redis) return
+
+  try {
+    await redis.set(`genrun:${runId}`, projectId, { ex: RUN_MAP_TTL_SECONDS })
+  } catch (err) {
+    console.warn('[jobs/redis] setRunProject failed', err)
+  }
+}
+
+export async function getRunProject(runId: string): Promise<string | null> {
+  const redis = getRedis()
+  if (!redis) return null
+
+  try {
+    return await redis.get<string>(`genrun:${runId}`)
+  } catch (err) {
+    console.warn('[jobs/redis] getRunProject failed', err)
+    return null
+  }
+}
