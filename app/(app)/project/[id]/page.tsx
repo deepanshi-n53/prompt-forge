@@ -13,6 +13,8 @@ import { cn } from '@/lib/utils'
 import type { BRDHealthReport, ParsedBRD } from '@/types'
 
 const STATUS_STYLES: Record<string, string> = {
+  DRAFT:      'bg-zinc-50 text-zinc-600 border-zinc-200',
+  PARSING:    'bg-amber-50 text-amber-700 border-amber-200',
   PROCESSING: 'bg-blue-50 text-blue-700 border-blue-200',
   PARSED:     'bg-violet-50 text-violet-700 border-violet-200',
   READY:      'bg-green-50 text-green-700 border-green-200',
@@ -162,7 +164,7 @@ export default async function ProjectPage({
                 ) : (
                   <div className="rounded-xl border border-dashed border-zinc-200 bg-zinc-50 p-6 text-center">
                     <p className="text-sm text-zinc-500">
-                      {project.status === 'PROCESSING'
+                      {project.status === 'PARSING'
                         ? 'Analysing your BRD…'
                         : 'Upload a BRD to see the health score'}
                     </p>

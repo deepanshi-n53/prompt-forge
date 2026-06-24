@@ -39,7 +39,7 @@ export default async function SetupPage({
   // wizard now would show an all-blank "Unknown" state and ask every question.
   // Show a loading state that polls and refreshes once parse completes (PARSED),
   // then this server component re-runs and falls through to the wizard below.
-  if (project.status === 'PROCESSING' || project.status === 'UPDATING') {
+  if (project.status === 'PARSING' || project.status === 'UPDATING') {
     return <AnalysingBRD projectId={id} />
   }
 

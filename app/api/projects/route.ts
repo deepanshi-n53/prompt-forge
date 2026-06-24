@@ -127,6 +127,9 @@ export async function POST(request: NextRequest) {
       description: parsed.data.description,
       ownerId:     user.id,
       orgId:       resolvedOrgId,
+      // A freshly-named project has no BRD yet — DRAFT, so it never shows as
+      // "generating". It moves to PARSING on BRD upload, PROCESSING on generation.
+      status:      'DRAFT',
     },
   })
 

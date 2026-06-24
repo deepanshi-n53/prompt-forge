@@ -39,9 +39,11 @@ export async function POST(_req: NextRequest, { params }: Context) {
     },
   })
 
+  // Re-analyse re-parses the BRD (it re-fires brd/uploaded above), so the project
+  // is PARSING — not PROCESSING, which is reserved for active generation.
   await db.project.update({
     where: { id },
-    data:  { status: 'PROCESSING' },
+    data:  { status: 'PARSING' },
   })
 
   return NextResponse.json({ success: true })

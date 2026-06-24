@@ -20,11 +20,13 @@ enum Plan {
 }
 
 enum ProjectStatus {
-  PROCESSING
-  PARSED
-  READY
+  DRAFT       // created, no BRD uploaded yet
+  PARSING     // BRD uploaded, being parsed/analysed
+  PROCESSING  // prompts actively generating
+  PARSED      // parse done, awaiting setup answers
+  READY       // generation complete
   ERROR
-  UPDATING
+  UPDATING    // re-analysing after a BRD change
 }
 
 enum BRDStatus {
@@ -113,7 +115,7 @@ model Project {
   id          String        @id @default(cuid())
   name        String
   description String?
-  status      ProjectStatus @default(PROCESSING)
+  status      ProjectStatus @default(DRAFT)
   archetype           String?
   archetypeConfidence Float?
   track               Track         @default(FAST)

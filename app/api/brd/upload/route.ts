@@ -105,6 +105,13 @@ export async function POST(request: NextRequest) {
     data:  { storagePath },
   })
 
+  // BRD uploaded → the project is now being parsed, not generating. PARSING keeps
+  // it out of the "generating prompts" banner until setup answers kick off a run.
+  await db.project.update({
+    where: { id: projectId },
+    data:  { status: 'PARSING' },
+  })
+
   const { ids } = await inngest.send({
     name: 'brd/uploaded',
     data: { brdId: brd.id, projectId, storagePath, mimeType: fileField.type },

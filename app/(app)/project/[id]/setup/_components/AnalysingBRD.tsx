@@ -4,10 +4,10 @@ import { useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 
 // Shown on the setup screen while the BRD is still being parsed
-// (project.status === 'PROCESSING'). The setup wizard is a server component that
+// (project.status === 'PARSING'). The setup wizard is a server component that
 // reads the extracted decisions ONCE on load, so rendering it before parse
 // finishes would show an all-blank "Unknown" state. Instead we poll the project
-// status and, the moment parsing completes (status leaves PROCESSING/UPDATING),
+// status and, the moment parsing completes (status leaves PARSING/UPDATING),
 // call router.refresh() to re-run the server component — which then renders the
 // wizard with the populated decisions. No manual refresh needed.
 const POLL_INTERVAL_MS = 2_500
@@ -30,7 +30,7 @@ export function AnalysingBRD({ projectId }: { projectId: string }) {
         // Anything other than the in-flight parse states means parse is done
         // (PARSED / ERROR / READY) — re-render the server component to show the
         // wizard (or the error/retry state it renders for ERROR).
-        if (status && status !== 'PROCESSING' && status !== 'UPDATING') {
+        if (status && status !== 'PARSING' && status !== 'UPDATING') {
           refreshed.current = true
           router.refresh()
         }
