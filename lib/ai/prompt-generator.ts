@@ -1,5 +1,6 @@
 import { callAI } from './ai-client'
 import { SECTION_TEMPLATES } from './section-templates'
+import { logger } from '@/lib/logger'
 import type { ParsedBRD } from '@/types/brd'
 import type { DecisionGraph, Assumption } from '@/types/decision'
 import type { TokenUsage } from './cost-estimator'
@@ -95,7 +96,7 @@ The "decisions" object must contain the key decisions THIS section locks in for 
 The "content" must be the full completed section — do NOT truncate or summarise.`
 }
 
-function safeParse(text: string): GeneratedContent {
+function safeParse(text: string, sectionNum?: string): GeneratedContent {
   const stripped = text
     .replace(/^```(?:json)?\s*/i, '')
     .replace(/\s*```\s*$/, '')
@@ -104,7 +105,18 @@ function safeParse(text: string): GeneratedContent {
   try {
     raw = JSON.parse(stripped) as Record<string, unknown>
   } catch {
-    // AI returned raw text, not JSON — wrap it
+    // AI returned raw text, not JSON — almost always because the completion was
+    // truncated at max_tokens mid-document, breaking the JSON. Log it so silent
+    // truncation (which shows up as a 0.4-confidence section) is visible.
+    logger.warn(
+      {
+        sectionNum,
+        chars:          stripped.length,
+        looksTruncated: !stripped.trimEnd().endsWith('}'),
+        tail:           stripped.slice(-80),
+      },
+      'generateSection: AI response was not valid JSON — using raw-text fallback (confidence 0.4)',
+    )
     return {
       content:    stripped,
       decisions:  {},
@@ -160,17 +172,19 @@ export async function generateSection(
       { role: 'system', content: systemPrompt },
       { role: 'user',   content: userMessage },
     ],
-    // The largest sections produce ~4,300 tokens of structured output; 4096 was
-    // truncating them mid-document, which broke the JSON wrapper and dropped them
-    // to the 0.4 raw-text fallback. 5000 gives full sections room to complete.
-    5000,
+    // The largest sections produce well over 5,000 tokens of structured output;
+    // a tight cap truncated them mid-document, breaking the JSON wrapper and
+    // dropping them to the 0.4 raw-text fallback. Use gpt-4o-mini's full 16,384
+    // output ceiling so no section is cut off — max_tokens is only a cap, so
+    // sections that finish early cost nothing extra.
+    16384,
     // Section generation is the highest-volume call by far — run it on the
     // cheaper model. BRD parsing and change detection stay on the default.
     { model: 'gpt-4o-mini' },
   )
 
   return {
-    ...safeParse(response.text),
+    ...safeParse(response.text, sectionNum),
     usage:           response.usage ?? null,
     promptChars:     systemPrompt.length + userMessage.length,
     completionChars: response.text.length,
