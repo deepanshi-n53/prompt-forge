@@ -45,6 +45,10 @@ const ARCHETYPE_TO_L3: Record<string, string> = {
   'b2b-saas':     '3D',
 }
 
+// Max sections generated concurrently within one dependency level. Bounds the
+// OpenAI request fan-out (rate limits) and the Inngest parallel-step width.
+const GEN_CONCURRENCY = 6
+
 function selectSections(
   allTemplates: SectionTemplate[],
   parsedBRD:    ParsedBRD,
@@ -208,7 +212,7 @@ export const generatePromptsJob = inngest.createFunction(
       return selected
     })
 
-    // ── Step 3: Cascade generation — sequential, decisions flow forward ────────
+    // ── Step 3: Cascade generation — level-parallel, decisions flow forward ────
 
     // Seed locked decisions from the full ArchitectureDecisions, plus legacy
     // BRD-derived keys for any consumer that still reads them.
@@ -253,6 +257,30 @@ export const generatePromptsJob = inngest.createFunction(
       return out
     }
 
+    // Group the selected sections into dependency levels (Kahn layering): a
+    // section joins a level once every one of its `depends` that is ALSO selected
+    // has landed in an earlier level. Sections within a level are mutually
+    // independent, so a level can be generated in parallel.
+    function computeLevels(nums: string[]): string[][] {
+      const selected  = new Set(nums)
+      const done      = new Set<string>()
+      const remaining = new Set(nums)
+      const levels: string[][] = []
+      while (remaining.size) {
+        const batch = [...remaining].filter((n) => {
+          const deps = templateByNum.get(n)?.depends ?? []
+          return deps.every((d) => !selected.has(d) || done.has(d))
+        })
+        // Defensive: a cycle / unresolvable dep would yield an empty batch — emit
+        // whatever remains as one final level rather than loop forever.
+        const layer = batch.length > 0 ? batch : [...remaining]
+        layer.sort((a, b) => nums.indexOf(a) - nums.indexOf(b))
+        levels.push(layer)
+        for (const n of layer) { remaining.delete(n); done.add(n) }
+      }
+      return levels
+    }
+
     // One meter for the whole run. Each section's cost is folded in OUTSIDE the
     // step callback (callbacks are memoized and don't re-run on replay), so the
     // accumulation stays deterministic — mirroring the lockedDecisions cascade.
@@ -284,27 +312,18 @@ export const generatePromptsJob = inngest.createFunction(
       Object.assign(lockedDecisions, flattenDecisions(decisions))
     }
 
-    for (const sectionNum of orderedNums) {
-      const tmpl = allTemplates.find(t => t.num === sectionNum)
-      if (!tmpl) continue
-
-      // Progress = sections generated so far / total. 0% before the first
-      // section completes, 100% after the last — planning steps don't count.
-      const pct = Math.round((completedIdx / totalSections) * 100)
-
-      // ── Human pause checkpoints ─────────────────────────────────────────────
-      // A section may need more than one answer (e.g. §09 asks needsRealtime, then
-      // realtimeMethod). Re-evaluate after every merge: getMidGenQuestion returns
-      // the next unanswered question or null. `handled` guards each field so a
-      // skipped (empty) answer never re-triggers the same pause. NO hardcoded list
-      // of pausing sections — it's driven entirely by what's still unknown.
+    // Resolve any mid-gen pause questions for ONE section, sequentially, applying
+    // each answer to `decisions` + `lockedDecisions`. Run BEFORE a level generates
+    // so a human checkpoint never has to block a parallel batch. A section may
+    // need more than one answer (§09 asks needsRealtime, then realtimeMethod);
+    // `handled` guards each field so a skipped answer never re-triggers it.
+    async function resolvePauses(sectionNum: string, tmpl: SectionTemplate, pct: number): Promise<void> {
       let pauseQ: PauseQuestion | null
       while ((pauseQ = getMidGenQuestion(sectionNum, decisions, handled)) != null) {
         const q = pauseQ
         const field = q.field
 
-        // Write the paused state inside a step so it is memoized — a raw
-        // side-effect would re-fire on every Inngest replay and flicker Redis.
+        // Memoized step so it doesn't re-fire (and flicker Redis) on replay.
         await step.run(`pause-state-${field}`, () =>
           setJobState(projectId, {
             status:  'paused',
@@ -316,10 +335,8 @@ export const generatePromptsJob = inngest.createFunction(
         )
 
         // Cap the wait so an unanswered pause never stalls the cascade. On
-        // timeout, waitForEvent resolves to null and we fall through to
-        // applyMidGenAnswer(q, null), which fills the field from its
-        // defaultValue / AI guess — generation always completes whether or not
-        // the user answers in time.
+        // timeout, waitForEvent resolves to null and applyMidGenAnswer(q, null)
+        // fills the field from its defaultValue / AI guess.
         const pauseEvent = await step.waitForEvent(`wait-${field}`, {
           event:   'brd/pause-answered',
           timeout: '90s',
@@ -335,10 +352,6 @@ export const generatePromptsJob = inngest.createFunction(
         applyMidGenAnswer(q, (pauseEvent?.data as Record<string, unknown> | null) ?? null)
         handled.add(field)
 
-        // Clear the paused state in Redis the instant we resume — without this,
-        // a reconnect during the gap before the next section completes would
-        // re-surface the (already-answered) pause modal. Memoized so it doesn't
-        // re-fire on replay.
         await step.run(`resume-${field}`, () =>
           setJobState(projectId, {
             status:  'running',
@@ -348,15 +361,14 @@ export const generatePromptsJob = inngest.createFunction(
           }),
         )
       }
+    }
 
-      // Build this section's locked-decision context: the fixed foundational seed
-      // (app identity + the rich ArchitectureDecisions, incl. any pause answers)
-      // plus ONLY the decisions emitted by sections in this section's dependency
-      // subgraph — NOT the full accumulated graph. The seed already carries every
-      // cross-cutting choice the consistency checker guards (dbEngine, authMethod,
-      // apiStyle, cloudProvider, paymentProvider…), so contradictions are still
-      // prevented while prompt size stays roughly constant across the cascade.
-      // Snapshot BY VALUE — Inngest callbacks don't re-run on replay.
+    // Generate ONE section as a memoized step. The decision snapshot (the fixed
+    // foundational seed plus ONLY the decisions emitted by sections in this
+    // section's dependency subgraph — every earlier level is already folded in)
+    // is captured at queue time. The returned shape feeds metering + decision
+    // accumulation OUTSIDE the callback (Inngest memoizes returns across replays).
+    function generateOne(sectionNum: string, tmpl: SectionTemplate) {
       const seed: Record<string, string> = {
         productPurpose:    parsedBRD.productPurpose    ?? '',
         archetype:         parsedBRD.archetype         ?? '',
@@ -369,7 +381,7 @@ export const generatePromptsJob = inngest.createFunction(
         Object.assign(decisionsSnapshot, sectionDecisions.get(dep) ?? {})
       }
 
-      const stepResult = await step.run(`generate-${sectionNum}`, async () => {
+      return step.run(`generate-${sectionNum}`, async () => {
         const result = await generateSection(
           sectionNum,
           tmpl.template,
@@ -403,10 +415,6 @@ export const generatePromptsJob = inngest.createFunction(
           },
         })
 
-        // Return decisions + cost-metering inputs so we can accumulate them
-        // OUTSIDE the callback (Inngest memoizes this return value, so it's
-        // available on replay too). usage is the provider's real token counts
-        // when available; promptChars/completionChars are the fallback estimate.
         return {
           sectionNum,
           confidence:      result.confidence,
@@ -416,42 +424,65 @@ export const generatePromptsJob = inngest.createFunction(
           completionChars: result.completionChars ?? 0,
         }
       })
+    }
 
-      // Accumulate the decisions this section locked in — runs on every invoke
-      // (fresh + replay). lockedDecisions stays the FULL cascade (the consistency
-      // checker cross-references all of it at the end); sectionDecisions keeps the
-      // same data attributed per-section so dependents can pull just their subgraph.
-      if (stepResult.decisions && Object.keys(stepResult.decisions).length > 0) {
-        Object.assign(lockedDecisions, stepResult.decisions)
-        sectionDecisions.set(sectionNum, stepResult.decisions)
+    // Generate level by level: independent sections within a level run in
+    // parallel (capped at GEN_CONCURRENCY), levels run in order so each section's
+    // dependency decisions are already folded into the cascade before it runs.
+    const levels = computeLevels(orderedNums)
+
+    for (const level of levels) {
+      const pct = Math.round((completedIdx / totalSections) * 100)
+
+      const sections = level
+        .map((num) => ({ num, tmpl: templateByNum.get(num) }))
+        .filter((x): x is { num: string; tmpl: SectionTemplate } => x.tmpl != null)
+      if (sections.length === 0) continue
+
+      // 1) Pause phase — sequential, before the level generates.
+      for (const { num, tmpl } of sections) {
+        await resolvePauses(num, tmpl, pct)
       }
 
-      // Meter this call's cost the same way — from the memoized return value, so
-      // the run total is identical on a fresh run and any replay. Prefers real
-      // usage; falls back to the char-count estimate when usage is absent (mock).
-      meter.meter({
-        usage:       stepResult.usage,
-        inputChars:  stepResult.promptChars,
-        outputChars: stepResult.completionChars,
-      })
+      // 2) Generate the level in parallel waves (≤ GEN_CONCURRENCY each), folding
+      //    decisions + metering + progress after EACH wave. Per-wave (not
+      //    per-level) progress keeps the UI advancing so a wide level never goes
+      //    minutes without an update and trips the page's stuck detection.
+      for (let i = 0; i < sections.length; i += GEN_CONCURRENCY) {
+        const wave = sections.slice(i, i + GEN_CONCURRENCY)
+        const results = await Promise.all(wave.map(({ num, tmpl }) => generateOne(num, tmpl)))
 
-      completedIdx++
-      // Memoized so it runs exactly once per section. A RAW setJobState here is a
-      // replay hazard: on any Inngest re-invocation while the run is paused
-      // (waitForEvent pending), the live re-run of already-completed sections
-      // would write a 'running' frame AFTER the memoized (non-re-firing)
-      // pause-state frame, clobbering the stored pauseQuestion — so the client
-      // would never see the pause modal and the run would hang until timeout.
-      const donePercent = Math.round((completedIdx / totalSections) * 100)
-      const doneCount   = completedIdx
-      await step.run(`progress-${sectionNum}`, () =>
-        setJobState(projectId, {
-          status:  'running',
-          percent: donePercent,
-          step:    `generate-${sectionNum}`,
-          message: `§${sectionNum} complete (${doneCount}/${totalSections})…`,
-        }),
-      )
+        // Fold decisions + meter in deterministic order so a fresh run and any
+        // replay accumulate identically. lockedDecisions stays the FULL cascade
+        // (the consistency checker reads all of it); sectionDecisions keeps it
+        // attributed per-section for the dependency-scoped snapshots.
+        for (const r of results) {
+          if (r.decisions && Object.keys(r.decisions).length > 0) {
+            Object.assign(lockedDecisions, r.decisions)
+            sectionDecisions.set(r.sectionNum, r.decisions)
+          }
+          meter.meter({
+            usage:       r.usage,
+            inputChars:  r.promptChars,
+            outputChars: r.completionChars,
+          })
+        }
+
+        // Progress — one memoized write per wave (never a raw setJobState, which
+        // would re-fire on replay and clobber a pause frame).
+        completedIdx += wave.length
+        const donePercent = Math.round((completedIdx / totalSections) * 100)
+        const doneCount   = completedIdx
+        const waveTag     = wave[wave.length - 1].num
+        await step.run(`progress-${waveTag}`, () =>
+          setJobState(projectId, {
+            status:  'running',
+            percent: donePercent,
+            step:    `generate-${waveTag}`,
+            message: `Generated sections (${doneCount}/${totalSections})…`,
+          }),
+        )
+      }
     }
 
     // ── Step 4: Persist this run's AI cost ────────────────────────────────────

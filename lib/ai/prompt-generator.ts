@@ -160,7 +160,10 @@ export async function generateSection(
       { role: 'system', content: systemPrompt },
       { role: 'user',   content: userMessage },
     ],
-    4096,
+    // The largest sections produce ~4,300 tokens of structured output; 4096 was
+    // truncating them mid-document, which broke the JSON wrapper and dropped them
+    // to the 0.4 raw-text fallback. 5000 gives full sections room to complete.
+    5000,
     // Section generation is the highest-volume call by far — run it on the
     // cheaper model. BRD parsing and change detection stay on the default.
     { model: 'gpt-4o-mini' },
