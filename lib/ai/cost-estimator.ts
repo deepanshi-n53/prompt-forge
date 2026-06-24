@@ -45,8 +45,20 @@ const PRICING: Record<string, ModelPrice> = {
 
 const DEFAULT_MODEL = 'gpt-4o'
 
+// Base-model keys, longest first, so prefix matching prefers the most specific
+// (e.g. "gpt-4o-mini" before "gpt-4o" — both are prefixes of "gpt-4o-mini-…").
+const PRICING_KEYS = Object.keys(PRICING).sort((a, b) => b.length - a.length)
+
 function priceFor(model: string): ModelPrice {
-  return PRICING[model] ?? PRICING[DEFAULT_MODEL]
+  // Exact hit first.
+  const exact = PRICING[model]
+  if (exact) return exact
+  // Providers echo dated snapshots ("gpt-4o-mini-2024-07-18", "gpt-4o-2024-08-06")
+  // that aren't table keys. Match the longest base-model key the name starts with
+  // so a snapshot is priced as its base model — NOT silently charged at the
+  // pricier gpt-4o default (the bug that overcounted gpt-4o-mini runs ~16x).
+  const base = PRICING_KEYS.find((k) => model.startsWith(k))
+  return PRICING[base ?? DEFAULT_MODEL] ?? PRICING[DEFAULT_MODEL]
 }
 
 // Rough token estimate when no real usage is available: ~4 characters per token.
