@@ -5,15 +5,13 @@ import { getTemplatesForTrack } from '@/lib/ai/section-templates'
 import type { SectionTemplate } from '@/lib/ai/section-templates'
 import { sendPromptsReadyEmail } from '@/lib/email'
 import { setJobState, setRunProject } from '@/lib/jobs/redis'
-import { applyAnswersToDecisions, emptyDecisions, normalizeDecisions } from '@/lib/ai/brd-parser'
-import { getMidGenQuestion } from '@/lib/ai/gap-analyzer'
+import { emptyDecisions, normalizeDecisions } from '@/lib/ai/brd-parser'
 import { CostMeter, addRunToTotal } from '@/lib/ai/cost-estimator'
 import { checkConsistency } from '@/lib/ai/consistency-checker'
 import { logger } from '@/lib/logger'
 import { Prisma, ProjectStatus, Track, PromptStatus } from '@prisma/client'
 import type { ArchitectureDecisions, ParsedBRD } from '@/types/brd'
 import type { DecisionGraph, SectionDecision } from '@/types/decision'
-import type { PauseQuestion } from '@/types/api'
 
 interface BRDAnsweredPayload {
   projectId:       string
@@ -114,8 +112,8 @@ export const generatePromptsJob = inngest.createFunction(
     timeouts: { finish: '30m' },
     triggers: [{ event: 'brd/answered' }],
     // Let the cancel endpoint stop a stuck run: POST /cancel sends
-    // `generation/cancel` with the projectId, which aborts this run (including a
-    // waitForEvent pause) instead of leaving it hanging until the 15m timeout.
+    // `generation/cancel` with the projectId, which aborts this run instead of
+    // leaving it hanging until the finish timeout.
     cancelOn: [
       { event: 'generation/cancel', if: 'async.data.projectId == event.data.projectId' },
     ],
@@ -231,7 +229,6 @@ export const generatePromptsJob = inngest.createFunction(
 
     const allTemplates  = getTemplatesForTrack(track)
     const totalSections = orderedNums.length
-    const handled       = new Set<string>()
     let   completedIdx  = 0
 
     // Per-section decisions, attributed to the section that emitted them, so a
@@ -293,80 +290,11 @@ export const generatePromptsJob = inngest.createFunction(
     // (usage.model), so the gpt-4o-mini section calls are costed correctly.
     const meter = new CostMeter()
 
-    // Merge a mid-gen pause answer back into BOTH the rich decisions (for
-    // confidence / dedupe) and the flat locked map (for downstream prompts), at
-    // confidence 1.0. Handles a single-field pause (data.answer) and a
-    // multi-question pause such as §20 compliance (data.answers map). A blank /
-    // skipped answer falls back to the question's defaultValue.
-    function applyMidGenAnswer(q: PauseQuestion, data: Record<string, unknown> | null): void {
-      if (q.questions && q.questions.length > 0) {
-        const answers = (data?.answers as Record<string, string> | undefined) ?? {}
-        const merged: Record<string, string> = {}
-        for (const sub of q.questions) {
-          const a = answers[sub.field]
-          merged[sub.field] = a && a.trim() ? a.trim() : sub.defaultValue
-        }
-        decisions = applyAnswersToDecisions(decisions, merged)
-      } else {
-        const raw    = data?.answer as string | undefined
-        const answer = raw && raw.trim() ? raw.trim() : q.defaultValue
-        decisions = applyAnswersToDecisions(decisions, { [q.field]: answer })
-      }
-      // Re-flatten so every field the answer touched (booleans → yes/no, arrays →
-      // joined) overwrites the locked map the downstream sections read.
-      Object.assign(lockedDecisions, flattenDecisions(decisions))
-    }
-
-    // Resolve any mid-gen pause questions for ONE section, sequentially, applying
-    // each answer to `decisions` + `lockedDecisions`. Run BEFORE a level generates
-    // so a human checkpoint never has to block a parallel batch. A section may
-    // need more than one answer (§09 asks needsRealtime, then realtimeMethod);
-    // `handled` guards each field so a skipped answer never re-triggers it.
-    async function resolvePauses(sectionNum: string, tmpl: SectionTemplate, pct: number): Promise<void> {
-      let pauseQ: PauseQuestion | null
-      while ((pauseQ = getMidGenQuestion(sectionNum, decisions, handled)) != null) {
-        const q = pauseQ
-        const field = q.field
-
-        // Memoized step so it doesn't re-fire (and flicker Redis) on replay.
-        await step.run(`pause-state-${field}`, () =>
-          setJobState(projectId, {
-            status:  'paused',
-            percent: pct,
-            step:    `pause-${field}`,
-            message: `Paused at §${sectionNum} — ${tmpl.name}`,
-            pauseQuestion: { ...q, sectionNum, sectionName: q.sectionName ?? tmpl.name },
-          }),
-        )
-
-        // Cap the wait so an unanswered pause never stalls the cascade. On
-        // timeout, waitForEvent resolves to null and applyMidGenAnswer(q, null)
-        // fills the field from its defaultValue / AI guess.
-        const pauseEvent = await step.waitForEvent(`wait-${field}`, {
-          event:   'brd/pause-answered',
-          timeout: '90s',
-          if:      `async.data.projectId == "${projectId}" && async.data.field == "${field}"`,
-        })
-
-        if (pauseEvent === null) {
-          logger.info(
-            { projectId, sectionNum, field, defaultValue: q.defaultValue },
-            'Mid-gen pause timed out — proceeding with default value',
-          )
-        }
-        applyMidGenAnswer(q, (pauseEvent?.data as Record<string, unknown> | null) ?? null)
-        handled.add(field)
-
-        await step.run(`resume-${field}`, () =>
-          setJobState(projectId, {
-            status:  'running',
-            percent: pct,
-            step:    `resume-${field}`,
-            message: 'Answer received — resuming generation…',
-          }),
-        )
-      }
-    }
+    // NOTE: there are intentionally NO mid-generation pauses. All gap questions
+    // (real-time, file storage, compliance, i18n, …) are asked UP FRONT in the
+    // setup wizard (see SETUP_FIELDS in gap-analyzer) and merged into `decisions`
+    // before generation starts, so a run never blocks on user input — a locked
+    // screen or missed modal can no longer time out and cancel the run.
 
     // Generate ONE section as a memoized step. The decision snapshot (the fixed
     // foundational seed plus ONLY the decisions emitted by sections in this
@@ -437,19 +365,12 @@ export const generatePromptsJob = inngest.createFunction(
     const levels = computeLevels(orderedNums)
 
     for (const level of levels) {
-      const pct = Math.round((completedIdx / totalSections) * 100)
-
       const sections = level
         .map((num) => ({ num, tmpl: templateByNum.get(num) }))
         .filter((x): x is { num: string; tmpl: SectionTemplate } => x.tmpl != null)
       if (sections.length === 0) continue
 
-      // 1) Pause phase — sequential, before the level generates.
-      for (const { num, tmpl } of sections) {
-        await resolvePauses(num, tmpl, pct)
-      }
-
-      // 2) Generate the level in parallel waves (≤ GEN_CONCURRENCY each), folding
+      // Generate the level in parallel waves (≤ GEN_CONCURRENCY each), folding
       //    decisions + metering + progress after EACH wave. Per-wave (not
       //    per-level) progress keeps the UI advancing so a wide level never goes
       //    minutes without an update and trips the page's stuck detection.

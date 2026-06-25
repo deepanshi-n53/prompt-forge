@@ -192,6 +192,51 @@ const SETUP_FIELDS: SetupFieldMeta[] = [
   { field: 'emailProvider', group: 'Integrations', threshold: 0.4,
     question: 'Which service will send transactional emails (welcome, password reset, notifications)?', inputType: 'select',
     options: [opt('Resend', 'Resend (recommended)'), opt('SendGrid'), opt('Postmark'), opt('Nodemailer/SMTP')] },
+
+  // ── Real-time & Storage (formerly mid-gen pauses for §09 / §10) ───────────────
+  { field: 'needsRealtime', group: 'Real-time & Storage', threshold: 0.5,
+    question: 'Does your app need real-time features? (live chat, live tracking, collaborative editing, live dashboards)',
+    inputType: 'boolean', options: null },
+  { field: 'realtimeMethod', group: 'Real-time & Storage', threshold: 0.5,
+    question: 'Which real-time method suits your app?', inputType: 'select',
+    options: [
+      opt('WebSocket', 'WebSocket — bidirectional (chat, presence, collaboration)'),
+      opt('SSE', 'SSE — server-push only (notifications, live feeds)'),
+      opt('polling', 'Polling — periodic refresh (simplest)'),
+    ],
+    conditionalOn: (d) => d.needsRealtime === true },
+  { field: 'needsFileStorage', group: 'Real-time & Storage', threshold: 0.5,
+    question: 'Will users upload files, images, videos, or documents?',
+    inputType: 'boolean', options: null },
+  { field: 'fileStorageProvider', group: 'Real-time & Storage', threshold: 0.5,
+    question: 'Which file storage provider will you use?', inputType: 'select',
+    options: [
+      opt('Supabase Storage', 'Supabase Storage — simple, S3-compatible'),
+      opt('S3', 'AWS S3 — industry standard'),
+      opt('Cloudinary', 'Cloudinary — images / video with transforms'),
+    ],
+    conditionalOn: (d) => d.needsFileStorage === true },
+
+  // ── Compliance & Data (formerly mid-gen pauses for §18 / §20) ─────────────────
+  { field: 'gdprRequired', group: 'Compliance & Data', threshold: 0.5,
+    question: 'Will you serve users in the EU? (GDPR)', inputType: 'boolean', options: null },
+  { field: 'hipaaRequired', group: 'Compliance & Data', threshold: 0.5,
+    question: 'Will your app handle any health, medical, or clinical data? (HIPAA)',
+    inputType: 'boolean', options: null },
+  { field: 'pciRequired', group: 'Compliance & Data', threshold: 0.5,
+    question: 'Will you store or process raw credit-card data? (PCI-DSS)', inputType: 'boolean', options: null },
+  { field: 'launchRegions', group: 'Compliance & Data', threshold: 0.5,
+    question: 'Which countries or regions are you launching in? (comma-separated)', inputType: 'text', options: null },
+  { field: 'sensitiveDataTypes', group: 'Compliance & Data', threshold: 0.5,
+    question: 'What sensitive data will your app store? (comma-separated)', inputType: 'text', options: null },
+
+  // ── Internationalisation (formerly mid-gen pause for §31) ─────────────────────
+  { field: 'multiLanguage', group: 'Internationalisation', threshold: 0.5,
+    question: 'Does your app need to support multiple languages?', inputType: 'boolean', options: null },
+  { field: 'languages', group: 'Internationalisation', threshold: 0.5,
+    question: 'Which languages do you need to support? (comma-separated, e.g. English, Hindi, French)',
+    inputType: 'text', options: null,
+    conditionalOn: (d) => d.multiLanguage === true },
 ]
 
 // Returns a question for EVERY setup field below its confidence threshold — no cap.
