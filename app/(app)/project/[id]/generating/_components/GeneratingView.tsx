@@ -3,7 +3,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useJobProgress } from '@/hooks/useJobProgress'
-import { GenerationPauseModal } from '@/components/shared/GenerationPauseModal'
 import { cn } from '@/lib/utils'
 
 // ── Animated SVG ring ─────────────────────────────────────────────────────────
@@ -173,15 +172,6 @@ export function GeneratingView({ projectId, jobId, isOnboarding = false }: Gener
     }
   }, [progress.status, dbStatus, projectId, isOnboarding, router])
 
-  // Track which pause question was answered (by field), NOT a one-shot boolean —
-  // a single generation can pause multiple times (e.g. §06 MFA, §09 real-time,
-  // §12 payments, §20 compliance), so we must re-show the modal per question.
-  const [answeredField, setAnsweredField] = useState<string | null>(null)
-  const currentPauseField = progress.pauseQuestion?.field ?? null
-
-  const isPaused   = progress.status === 'paused'
-    && !!progress.pauseQuestion
-    && answeredField !== currentPauseField
   const isFailed   = progress.status === 'failed'  || dbStatus === 'error'
   const isComplete = progress.status === 'complete' || dbStatus === 'ready'
   // When DB says ready but Redis has no data, show 100%
@@ -210,7 +200,7 @@ export function GeneratingView({ projectId, jobId, isOnboarding = false }: Gener
   const lastCompleted  = useRef<number>(0)
   const [isStuck, setIsStuck] = useState(false)
 
-  const isActive = !isComplete && !isFailed && !isPaused
+  const isActive = !isComplete && !isFailed
 
   // Record the wall-clock time of forward progress (a section completing) in a
   // ref only — no state writes here, so Date.now() never runs during render.
@@ -251,16 +241,6 @@ export function GeneratingView({ projectId, jobId, isOnboarding = false }: Gener
 
   return (
     <div className="flex min-h-full flex-col items-center justify-center px-4 py-12">
-      {/* Mid-generation pause modal */}
-      {isPaused && progress.pauseQuestion && (
-        <GenerationPauseModal
-          key={progress.pauseQuestion.field}
-          projectId={projectId}
-          pauseQuestion={progress.pauseQuestion}
-          onAnswered={() => setAnsweredField(progress.pauseQuestion!.field)}
-        />
-      )}
-
       <div className="w-full max-w-sm space-y-6 text-center">
 
         {/* ring + status */}
@@ -279,13 +259,11 @@ export function GeneratingView({ projectId, jobId, isOnboarding = false }: Gener
                 'text-xl font-bold',
                 isFailed   ? 'text-red-700'
                 : isComplete ? 'text-green-700'
-                : isPaused   ? 'text-amber-700'
                 : 'text-zinc-900',
               )}
             >
               {isFailed   ? 'Generation stopped'
               : isComplete ? 'Architecture ready!'
-              : isPaused   ? 'Waiting for your answer…'
               : 'Generating your architecture…'}
             </h2>
             <p className="text-sm text-zinc-500">{progress.message}</p>

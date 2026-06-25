@@ -73,9 +73,8 @@ export async function GET(request: NextRequest, { params }: Context) {
               message:   state.message,
               step:      state.step,
               updatedAt: state.updatedAt, // lets the client dedupe SSE vs poll frames
-              ...(state.result        !== undefined ? { result:        state.result        } : {}),
-              ...(state.error         !== undefined ? { error:         state.error         } : {}),
-              ...(state.pauseQuestion !== undefined ? { pauseQuestion: state.pauseQuestion } : {}),
+              ...(state.result !== undefined ? { result: state.result } : {}),
+              ...(state.error  !== undefined ? { error:  state.error  } : {}),
             })
             enqueue(`id: ${state.updatedAt}\ndata: ${payload}\n\n`)
           }
