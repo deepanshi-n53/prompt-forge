@@ -79,7 +79,7 @@ const STATUS_META: Record<string, StatusMeta> = {
   PROCESSING: { dot: 'bg-amber-500', pulse: true,  text: () => 'Generating…',                                                   href: (id) => `/project/${id}/generating?jobId=${id}` },
   PARSING:    { dot: 'bg-amber-500', pulse: true,  text: () => 'Analysing BRD…',                                                href: (id) => `/project/${id}` },
   UPDATING:   { dot: 'bg-amber-500', pulse: true,  text: () => 'Updating…',                                                     href: (id) => `/project/${id}/generating?jobId=${id}` },
-  READY:      { dot: 'bg-green-500', pulse: false, text: (p) => `${p.promptCount} section${p.promptCount !== 1 ? 's' : ''} ready`, href: (id) => `/project/${id}/prompts` },
+  READY:      { dot: 'bg-green-500', pulse: false, text: (p) => `${p.promptCount} section${p.promptCount !== 1 ? 's' : ''} ready`, href: (id) => `/project/${id}` },
   PARSED:     { dot: 'bg-blue-500',  pulse: false, text: () => 'Ready to setup',                                                href: (id) => `/project/${id}/setup` },
   ERROR:      { dot: 'bg-red-500',   pulse: false, text: () => 'Generation failed',                                            href: (id) => `/project/${id}/setup` },
 }
