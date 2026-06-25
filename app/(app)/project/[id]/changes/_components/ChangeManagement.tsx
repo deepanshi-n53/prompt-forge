@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { cn } from '@/lib/utils'
 import { useJobProgress } from '@/hooks/useJobProgress'
 import { JobProgressBar } from '@/components/shared/JobProgressBar'
@@ -193,7 +194,7 @@ function SectionRow({ section }: { section: SectionImpact }) {
 
 // ── History card ──────────────────────────────────────────────────────────────
 
-function HistoryCard({ event }: { event: ChangeEventData }) {
+function HistoryCard({ event, projectId }: { event: ChangeEventData; projectId: string }) {
   const analysis = event.changeAnalysis
   const hasAnalysis = Boolean(analysis?.summary)
 
@@ -247,6 +248,14 @@ function HistoryCard({ event }: { event: ChangeEventData }) {
           <span className="text-[11px] text-zinc-400">
             {new Date(event.createdAt).toLocaleDateString()}
           </span>
+          {event.status === 'APPLIED' && (
+            <Link
+              href={`/project/${projectId}/changes/${event.id}`}
+              className="text-[11px] font-medium text-indigo-600 underline underline-offset-2 hover:text-indigo-800"
+            >
+              Compare versions →
+            </Link>
+          )}
         </div>
       </div>
     </div>
@@ -456,7 +465,7 @@ export function ChangeManagement({ projectId, events }: Props) {
           </h2>
           <div className="space-y-3">
             {pastEvents.map((e) => (
-              <HistoryCard key={e.id} event={e} />
+              <HistoryCard key={e.id} event={e} projectId={projectId} />
             ))}
           </div>
         </section>
