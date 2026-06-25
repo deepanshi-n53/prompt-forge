@@ -3,6 +3,7 @@ import { db } from '@/lib/db/prisma'
 import { generateSection } from '@/lib/ai/prompt-generator'
 import { SECTION_TEMPLATES } from '@/lib/ai/section-templates'
 import { setJobState } from '@/lib/jobs/redis'
+import { CostMeter, addRunToTotal } from '@/lib/ai/cost-estimator'
 import { Prisma, ChangeEventStatus, Track, PromptStatus } from '@prisma/client'
 import type { ParsedBRD } from '@/types/brd'
 import type { DecisionGraph, SectionDecision, ChangeAnalysis } from '@/types/decision'
@@ -123,17 +124,23 @@ export const generateDeltaJob = inngest.createFunction(
     // ── Step 3: regenerate BREAKING sections (batches of 3) ─────────────────
     const totalBatches = Math.ceil(totalCount / BATCH_SIZE)
 
+    // One meter for the whole delta run. Sections are metered OUTSIDE the step
+    // callback (Inngest memoizes returns, so accumulation stays deterministic on
+    // replay) — mirroring the main generate-prompts flow. Per-call model pricing
+    // costs the gpt-4o-mini section calls correctly.
+    const meter = new CostMeter()
+
     for (let i = 0; i < sectionNums.length; i += BATCH_SIZE) {
       const batchNums  = sectionNums.slice(i, i + BATCH_SIZE)
       const batchIndex = i / BATCH_SIZE
       // Progress arc: 18% → 85%
       const batchPct   = 18 + Math.round(((batchIndex + 1) / totalBatches) * 67)
 
-      await Promise.all(
+      const batchResults = await Promise.all(
         batchNums.map((sectionNum) =>
           step.run(`regen-${sectionNum}`, async () => {
             const template = SECTION_TEMPLATES[sectionNum]
-            if (!template) return { sectionNum, skipped: true }
+            if (!template) return { sectionNum, usage: null, promptChars: 0, completionChars: 0 }
 
             const result = await generateSection(
               sectionNum,
@@ -171,10 +178,27 @@ export const generateDeltaJob = inngest.createFunction(
               },
             })
 
-            return { sectionNum, confidence: result.confidence }
+            // Return cost-metering inputs so the run cost accumulates OUTSIDE the
+            // callback (Inngest memoizes this return → identical on replay).
+            return {
+              sectionNum,
+              usage:           result.usage ?? null,
+              promptChars:     result.promptChars ?? 0,
+              completionChars: result.completionChars ?? 0,
+            }
           }),
         ),
       )
+
+      // Meter this batch's cost from the memoized returns (prefers real provider
+      // usage; falls back to the char-count estimate when usage is absent).
+      for (const r of batchResults) {
+        meter.meter({
+          usage:       r.usage,
+          inputChars:  r.promptChars,
+          outputChars: r.completionChars,
+        })
+      }
 
       const completed = Math.min(i + BATCH_SIZE, sectionNums.length)
       await setJobState(projectId, {
@@ -184,6 +208,26 @@ export const generateDeltaJob = inngest.createFunction(
         message: `Regenerated ${completed} of ${totalCount} sections…`,
       })
     }
+
+    // ── Step 3b: persist this delta run's AI cost ──────────────────────────
+    // Fold the run total into the project's accumulated spend and count the run,
+    // exactly like the main generate-prompts flow. Memoized step → added exactly
+    // once, so the total isn't double-counted on an Inngest replay.
+    const runCents = meter.runTotalCents
+    await step.run('persist-delta-cost', async () => {
+      const project = await db.project.findUnique({
+        where:  { id: projectId },
+        select: { aiCostCents: true },
+      })
+      const newTotal = addRunToTotal(project?.aiCostCents ?? 0, runCents)
+      await db.project.update({
+        where: { id: projectId },
+        data:  {
+          aiCostCents:      newTotal,
+          aiGenerationRuns: { increment: 1 },
+        },
+      })
+    })
 
     // ── Step 4: update ChangeEvent + bump DecisionGraph version ────────────
     await step.run('update-change-event', async () => {
