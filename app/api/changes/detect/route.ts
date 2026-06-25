@@ -98,7 +98,12 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'File upload failed' }, { status: 500 })
   }
 
-  await db.bRD.update({ where: { id: newBrd.id }, data: { storagePath } })
+  // The re-uploaded BRD becomes the active one immediately (highest version), so
+  // the project always has exactly one active BRD and never falls back to the
+  // first-upload wizard. generate-delta-prompts loads the active BRD, so this is
+  // also what makes the delta regenerate against the NEW content. Existing prompts
+  // stay until the user applies the change (delta regenerates only affected ones).
+  await db.bRD.update({ where: { id: newBrd.id }, data: { storagePath, isActive: true } })
   await db.bRD.update({ where: { id: oldBrd.id }, data: { isActive: false } })
 
   const changeEvent = await db.changeEvent.create({

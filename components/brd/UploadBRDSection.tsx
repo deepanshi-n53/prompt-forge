@@ -1,9 +1,10 @@
 'use client'
 
-import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { BRDUploader } from '@/components/brd/BRDUploader'
-import { Button } from '@/components/ui/button'
+import { buttonVariants } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
 
 interface Props {
   projectId: string
@@ -12,41 +13,26 @@ interface Props {
 
 export function UploadBRDSection({ projectId, hasActiveBrd }: Props) {
   const router = useRouter()
-  const [open, setOpen] = useState(false)
 
-  function handleProcessing() {
-    if (hasActiveBrd) {
-      // Re-upload: reload page so the new active BRD is reflected
-      router.refresh()
-    } else {
-      // First upload: go to the wizard so the user can answer questions
-      // while the BRD is parsed in the background
-      router.push(`/project/${projectId}/setup`)
-    }
-  }
-
+  // Re-upload (an active BRD already exists) goes through the change-detection
+  // flow on the Changes page: it diffs the new BRD against the current one and
+  // regenerates ONLY the affected sections (generate-delta-prompts), instead of
+  // re-running the first-upload path (full parse → setup wizard → full
+  // generate-prompts). One clean flow on the existing project — no second upload
+  // UI and no wizard restart.
   if (hasActiveBrd) {
     return (
-      <div className="space-y-3">
-        {!open ? (
-          <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
-            Upload New BRD
-          </Button>
-        ) : (
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-zinc-900">Upload New BRD</h3>
-              <Button variant="ghost" size="sm" onClick={() => setOpen(false)}>
-                Cancel
-              </Button>
-            </div>
-            <BRDUploader projectId={projectId} onProcessing={handleProcessing} />
-          </div>
-        )}
-      </div>
+      <Link
+        href={`/project/${projectId}/changes`}
+        className={cn(buttonVariants({ variant: 'outline', size: 'sm' }))}
+      >
+        Upload New BRD
+      </Link>
     )
   }
 
+  // First upload: go to the wizard so the user can answer questions while the
+  // BRD is parsed in the background.
   return (
     <div className="space-y-4">
       <div>
@@ -55,7 +41,10 @@ export function UploadBRDSection({ projectId, hasActiveBrd }: Props) {
           Upload your Business Requirements Document to generate architecture prompts.
         </p>
       </div>
-      <BRDUploader projectId={projectId} onProcessing={handleProcessing} />
+      <BRDUploader
+        projectId={projectId}
+        onProcessing={() => router.push(`/project/${projectId}/setup`)}
+      />
     </div>
   )
 }
