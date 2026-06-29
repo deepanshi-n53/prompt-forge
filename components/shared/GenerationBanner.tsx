@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 
 interface ProjectRow {
@@ -25,9 +25,52 @@ export function GenerationBanner() {
   const [pending, setPending] = useState<ProjectRow[]>([]) // PARSED — needs setup answers
   const [dismissedKey, setDismissedKey] = useState<string | null>(null)
 
+  // Browser-notification bookkeeping: which projects we've already pinged (so a
+  // poll doesn't re-fire every 10s) and whether we've asked for permission once.
+  const notifiedRef     = useRef<Set<string>>(new Set())
+  const permRequestedRef = useRef(false)
+
   useEffect(() => {
     let cancelled = false
     let timer: ReturnType<typeof setInterval> | null = null
+
+    // Fire a desktop notification for newly-pending projects — this is what pulls
+    // a user who tabbed away back to the blocking setup step. Best-effort: no-ops
+    // when the API is unavailable or permission is denied (the banner still shows).
+    // Clicking it focuses the tab and jumps straight to that project's setup page.
+    function notifyPending(rows: ProjectRow[]) {
+      if (typeof window === 'undefined' || !('Notification' in window)) return
+
+      // Re-arm projects that left the pending set, so a later re-upload pings again.
+      const ids = new Set(rows.map((p) => p.id))
+      for (const id of notifiedRef.current) if (!ids.has(id)) notifiedRef.current.delete(id)
+
+      const fresh = rows.filter((p) => !notifiedRef.current.has(p.id))
+      if (fresh.length === 0) return
+
+      const fire = () => {
+        if (Notification.permission !== 'granted') return
+        for (const p of fresh) {
+          notifiedRef.current.add(p.id)
+          const n = new Notification('Setup needed to start generating', {
+            body: `“${p.name}” is parsed — answer a few setup questions to generate its prompts.`,
+            tag:  `setup-${p.id}`,
+          })
+          n.onclick = () => {
+            window.focus()
+            window.location.href = `/project/${p.id}/setup`
+            n.close()
+          }
+        }
+      }
+
+      if (Notification.permission === 'granted') {
+        fire()
+      } else if (Notification.permission === 'default' && !permRequestedRef.current) {
+        permRequestedRef.current = true
+        Notification.requestPermission().then(fire).catch(() => {})
+      }
+    }
 
     async function check() {
       try {
@@ -39,8 +82,10 @@ export function GenerationBanner() {
         const procData   = proc.ok   ? ((await proc.json())   as { projects?: ProjectRow[] }) : {}
         const parsedData = parsed.ok ? ((await parsed.json()) as { projects?: ProjectRow[] }) : {}
         if (!cancelled) {
-          setRunning(procData.projects   ?? [])
-          setPending(parsedData.projects ?? [])
+          const pendingRows = parsedData.projects ?? []
+          setRunning(procData.projects ?? [])
+          setPending(pendingRows)
+          notifyPending(pendingRows)
         }
       } catch {
         /* network hiccup — keep last known state */
