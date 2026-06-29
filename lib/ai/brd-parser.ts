@@ -213,6 +213,66 @@ export function emptyDecisions(): ArchitectureDecisions {
   return normalizeDecisions({})
 }
 
+// ── re-upload merge ───────────────────────────────────────────────────────────
+// Every canonical decision field (mirrors the field groups above) — used to walk
+// both decision sets when merging a re-uploaded BRD.
+const ALL_DECISION_FIELDS: readonly string[] = [
+  ...STRING_FIELDS, ...Object.keys(ENUM_FIELDS), ...BOOLEAN_FIELDS, ...ARRAY_FIELDS,
+  'targetConcurrentUsers',
+]
+
+// Effective confidence for a field: the parser's explicit score when present,
+// otherwise presence-based (a populated array counts as answered). Mirrors the
+// gap-analyzer's gating so "is this field answered?" means the same thing here.
+function fieldConfidence(d: ArchitectureDecisions, field: string): number {
+  const explicit = d.confidence[field]
+  if (typeof explicit === 'number') return explicit
+  const v = (d as unknown as Record<string, unknown>)[field]
+  if (Array.isArray(v)) return v.length > 0 ? 0.8 : 0
+  if (v == null || v === '') return 0
+  return 0.5
+}
+
+function valuesEqual(a: unknown, b: unknown): boolean {
+  if (Array.isArray(a) && Array.isArray(b)) {
+    if (a.length !== b.length) return false
+    const sa = [...a].sort(), sb = [...b].sort()
+    return sa.every((x, i) => x === sb[i])
+  }
+  return a === b
+}
+
+// Carry a previous BRD version's decisions forward when a re-upload is parsed, so
+// the setup wizard doesn't re-ask questions the user already answered. The prior
+// set (base) holds the user's confirmed gap answers at confidence 1.0; the fresh
+// parse of the NEW text overrides a field ONLY when it is at least as confident
+// AND actually different — i.e. the new BRD genuinely changed that field. So a
+// prior answer survives unless the new BRD restates it just as explicitly, while
+// fields the prior never answered fall through to the fresh parse.
+export function mergeDecisionsPreferringPrior(
+  prior: ArchitectureDecisions,
+  fresh: ArchitectureDecisions,
+): ArchitectureDecisions {
+  const out  = { ...prior, confidence: { ...prior.confidence } } as unknown as Record<string, unknown>
+  const conf = out.confidence as Record<string, number>
+
+  for (const field of ALL_DECISION_FIELDS) {
+    const pv = (prior as unknown as Record<string, unknown>)[field]
+    const fv = (fresh as unknown as Record<string, unknown>)[field]
+
+    const freshHasValue = Array.isArray(fv) ? fv.length > 0 : fv != null && fv !== ''
+    if (!freshHasValue) continue            // fresh parse says nothing new
+    if (valuesEqual(pv, fv)) continue       // unchanged
+
+    if (fieldConfidence(fresh, field) >= fieldConfidence(prior, field)) {
+      out[field] = fv
+      conf[field] = fresh.confidence[field] ?? fieldConfidence(fresh, field)
+    }
+  }
+
+  return normalizeDecisions(out)
+}
+
 // ── legacy bridge ─────────────────────────────────────────────────────────────
 // Map the rich extraction onto the legacy ParsedBRD shape so existing consumers
 // (generate-prompts, decision-builder, archetype-detector, gap-analyzer) keep

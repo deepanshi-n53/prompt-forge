@@ -1,7 +1,12 @@
 import { inngest } from '@/inngest/client'
 import { db } from '@/lib/db/prisma'
 import { extractTextFromStorage } from '@/lib/ai/text-extractor'
-import { parseBRDWithAI } from '@/lib/ai/brd-parser'
+import {
+  extractArchitectureDecisions,
+  decisionsToParsedBRD,
+  normalizeDecisions,
+  mergeDecisionsPreferringPrior,
+} from '@/lib/ai/brd-parser'
 import { detectChanges } from '@/lib/ai/change-detector'
 import { setJobState } from '@/lib/jobs/redis'
 import { Prisma, BRDStatus, ChangeEventStatus } from '@prisma/client'
@@ -101,15 +106,39 @@ export const detectChangesJob = inngest.createFunction(
     })
 
     // ── Step 3: parse new BRD with AI ───────────────────────────────────────
-    // Saves parsedContent so generate-delta-prompts can use it later
+    // Rich extraction of the NEW text, merged on top of the PREVIOUS version's
+    // stored decisions (which carry the user's confirmed gap answers at full
+    // confidence). This is what stops a re-upload from re-asking already-answered
+    // setup questions: only fields the new BRD genuinely changed — or that were
+    // never answered — fall back below threshold. Persisted in the same
+    // { ...legacy, architectureDecisions } shape the first-upload parse writes,
+    // so both the setup wizard and generate-delta-prompts read it correctly.
     await step.run('parse-new-brd', async () => {
-      const parsed = await parseBRDWithAI(newText)
+      const fresh = await extractArchitectureDecisions(newText)
+
+      const oldBrd = await db.bRD.findUnique({
+        where:  { id: oldBrdId },
+        select: { parsedContent: true },
+      })
+      const priorRaw = (oldBrd?.parsedContent as Record<string, unknown> | null)
+        ?.architectureDecisions
+      const merged = priorRaw
+        ? mergeDecisionsPreferringPrior(
+            normalizeDecisions(priorRaw as Record<string, unknown>),
+            fresh,
+          )
+        : fresh
+
+      const parsedContent = {
+        ...decisionsToParsedBRD(merged),
+        architectureDecisions: merged,
+      }
 
       await db.bRD.update({
         where: { id: newBrdId },
         data: {
           status:        BRDStatus.PARSED,
-          parsedContent: parsed as unknown as Prisma.InputJsonValue,
+          parsedContent: parsedContent as unknown as Prisma.InputJsonValue,
         },
       })
 
@@ -120,7 +149,7 @@ export const detectChangesJob = inngest.createFunction(
         message: 'Parsing updated requirements…',
       })
 
-      return parsed
+      return merged
     })
 
     // ── Step 4: load decisions ──────────────────────────────────────────────
