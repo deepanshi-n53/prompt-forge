@@ -14,14 +14,15 @@ export interface GapOption {
 
 // A question generated for a field the BRD did not confidently answer.
 export interface GapQuestion {
-  field:           string             // ArchitectureDecisions field name
-  group:           string             // Foundation | Architecture | Auth & Security | Database | API | Integrations
-  question:        string             // conversational prompt shown to the user
-  aiGuess:         string | null      // what the parser inferred, or null if nothing
-  preFilledAnswer: string | null      // inferred value (wizard input format) pre-selected
-  confidence:      number             // current confidence (0.0–0.99)
-  inputType:       GapInputType
-  options:         GapOption[] | null // for select / multiselect
+  field:            string             // ArchitectureDecisions field name
+  group:            string             // Foundation | Architecture | Auth & Security | Database | API | Integrations
+  question:         string             // conversational prompt shown to the user
+  aiGuess:          string | null      // what the parser inferred, or null if nothing
+  preFilledAnswer:  string | null      // inferred value (wizard input format) pre-selected
+  confidence:       number             // current confidence (0.0–0.99)
+  inputType:        GapInputType
+  options:          GapOption[] | null // for select / multiselect
+  fromPreviousAnswer: boolean          // pre-fill came from the user's past answers, not this BRD
 }
 
 export interface BRDInsight {
@@ -239,7 +240,14 @@ const SETUP_FIELDS: SetupFieldMeta[] = [
 ]
 
 // Returns a question for EVERY setup field below its confidence threshold — no cap.
-export function getSetupQuestions(decisions: ArchitectureDecisions): GapQuestion[] {
+// `defaults` is the user's remembered cross-project answers (portable preference
+// fields only). They pre-fill a question ONLY when this BRD inferred nothing for
+// it — a signal in the current document always wins over a stale global default —
+// and are flagged so the wizard shows them as "from your previous answers".
+export function getSetupQuestions(
+  decisions: ArchitectureDecisions,
+  defaults: Record<string, string> = {},
+): GapQuestion[] {
   const out: GapQuestion[] = []
 
   for (const meta of SETUP_FIELDS) {
@@ -247,15 +255,30 @@ export function getSetupQuestions(decisions: ArchitectureDecisions): GapQuestion
     if (conf >= meta.threshold) continue                              // BRD answered it
     if (meta.conditionalOn && !meta.conditionalOn(decisions)) continue // not applicable
 
+    let aiGuess         = conf > 0 ? aiGuessFor(meta.field, decisions) : null
+    let preFilledAnswer = conf > 0 ? answerValueFor(meta.field, decisions) : null
+    let fromPreviousAnswer = false
+
+    // No inference from this BRD → offer the user's last answer for this field.
+    if ((preFilledAnswer == null || preFilledAnswer === '')) {
+      const prior = defaults[meta.field as string]
+      if (prior != null && prior !== '') {
+        preFilledAnswer    = prior
+        aiGuess            = null
+        fromPreviousAnswer = true
+      }
+    }
+
     out.push({
       field:           meta.field as string,
       group:           meta.group,
       question:        meta.question,
-      aiGuess:         conf > 0 ? aiGuessFor(meta.field, decisions) : null,
-      preFilledAnswer: conf > 0 ? answerValueFor(meta.field, decisions) : null,
+      aiGuess,
+      preFilledAnswer,
       confidence:      Math.min(Math.round(conf * 100) / 100, 0.99),
       inputType:       meta.inputType,
       options:         meta.options,
+      fromPreviousAnswer,
     })
   }
 

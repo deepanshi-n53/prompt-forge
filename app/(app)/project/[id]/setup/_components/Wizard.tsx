@@ -254,6 +254,13 @@ function QuestionsForm({
                       {q.preFilledAnswer && <span className="text-amber-500"> — confirm or change</span>}
                     </div>
                   )}
+                  {q.fromPreviousAnswer && q.preFilledAnswer && (
+                    <div className="mt-1.5 inline-flex items-center gap-1.5 rounded-full border border-indigo-200 bg-indigo-50 px-2.5 py-0.5 text-[11px] text-indigo-700">
+                      <span className="inline-block h-1.5 w-1.5 rounded-full bg-indigo-400" />
+                      From your previous answers: <strong>{q.preFilledAnswer}</strong>
+                      <span className="text-indigo-500"> — confirm or change</span>
+                    </div>
+                  )}
                   <div className="mt-3">
                     <QuestionField
                       question={q}

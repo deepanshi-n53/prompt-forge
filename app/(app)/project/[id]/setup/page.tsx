@@ -62,8 +62,18 @@ export default async function SetupPage({
     : fromGraph && hasAnyDecision(fromGraph) ? fromGraph
     : fromBRD ?? fromGraph ?? emptyDecisions()
 
+  // The user's remembered cross-project preferences (db engine, compliance, …)
+  // pre-fill any gap question this BRD didn't infer — shown as an editable
+  // "from your previous answers" default, never applied silently.
+  const defaultRows = await db.userAnswerDefault.findMany({
+    where:  { userId: user.id },
+    select: { field: true, value: true },
+  })
+  const answerDefaults: Record<string, string> = {}
+  for (const row of defaultRows) answerDefaults[row.field] = row.value
+
   const insightGroups = buildInsights(decisions)
-  const gapQuestions  = getSetupQuestions(decisions)
+  const gapQuestions  = getSetupQuestions(decisions, answerDefaults)
   const { confirmed, inferred, unknown } = summarizeConfidence(decisions)
 
   return (

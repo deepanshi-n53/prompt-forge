@@ -79,8 +79,25 @@ model User {
   projects        Project[]
   memberships     OrgMember[]
   deletionRequest DeletionRequest?
+  answerDefaults  UserAnswerDefault[]
 
   @@index([clerkId])
+}
+
+// Per-user remembered setup answers for cross-project pre-fill. Only "portable"
+// preference fields are stored here (see lib/ai/answer-defaults.ts) — never an
+// app's identity fields. One row per (user, field); the latest answer wins.
+model UserAnswerDefault {
+  id        String   @id @default(cuid())
+  userId    String
+  field     String
+  value     String
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, field])
+  @@index([userId])
 }
 
 model Organisation {

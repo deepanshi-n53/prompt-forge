@@ -5,6 +5,7 @@ import { requireAuth } from '@/lib/auth'
 import { inngest } from '@/inngest/client'
 import { buildDecisionGraph, decisionsToWizardAnswers } from '@/lib/ai/decision-builder'
 import { applyAnswersToDecisions, decisionsToParsedBRD, emptyDecisions, normalizeDecisions } from '@/lib/ai/brd-parser'
+import { isPortableDefaultField } from '@/lib/ai/answer-defaults'
 import { answersSchema } from '@/lib/validations'
 
 type Context = { params: Promise<{ id: string }> }
@@ -59,6 +60,23 @@ export async function POST(request: NextRequest, { params }: Context) {
 
   // 2. Merge user answers in at full confidence.
   const mergedDecisions = applyAnswersToDecisions(baseDecisions, userAnswers)
+
+  // 2b. Remember the user's portable preferences (stack, compliance, i18n) so a
+  //     later project can pre-fill them. App-identity answers are never stored.
+  const portableAnswers = Object.entries(userAnswers).filter(
+    ([field, value]) => isPortableDefaultField(field) && value != null && value.trim() !== '',
+  )
+  if (portableAnswers.length > 0) {
+    await Promise.all(
+      portableAnswers.map(([field, value]) =>
+        db.userAnswerDefault.upsert({
+          where:  { userId_field: { userId: user.id, field } },
+          create: { userId: user.id, field, value: value!.trim() },
+          update: { value: value!.trim() },
+        }),
+      ),
+    )
+  }
 
   // 3. Persist the merged decisions back onto the BRD (legacy view + rich view),
   //    so both the generation pipeline and the setup screen reflect the answers.
