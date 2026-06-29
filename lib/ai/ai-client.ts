@@ -3,11 +3,17 @@ import OpenAI from 'openai'
 import { Ollama } from 'ollama'
 import type { TokenUsage } from './cost-estimator'
 
-// Startup guard — runs once at module load. Production must serve real,
-// hosted-model prompts: never fake ('mock') or a local model ('ollama'), and
-// never an unset provider (which would silently fall through to a default).
-// Fail fast and loud so a misconfigured deploy can't ship generic prompts.
-if (process.env.NODE_ENV === 'production') {
+// Production must serve real, hosted-model prompts: never fake ('mock') or a
+// local model ('ollama'), and never an unset provider (which would silently fall
+// through to a default). Fail fast and loud so a misconfigured deploy can't ship
+// generic prompts.
+//
+// Checked at call time — NOT at module load. `next build` runs with
+// NODE_ENV=production but no AI_PROVIDER (it isn't needed to build), so a
+// module-load throw crashed page-data collection for every page that imports the
+// AI stack. The first real AI call still throws loudly if misconfigured.
+function assertValidProvider(): void {
+  if (process.env.NODE_ENV !== 'production') return
   const provider = process.env.AI_PROVIDER
   if (provider === 'mock' || provider === 'ollama' || !provider) {
     throw new Error(
@@ -48,6 +54,7 @@ export async function callAI(
   maxTokens: number = 4000,
   options: AICallOptions = {},
 ): Promise<AIResponse> {
+  assertValidProvider()
   const provider = process.env.AI_PROVIDER ?? 'openai'
 
   if (provider === 'mock') {
