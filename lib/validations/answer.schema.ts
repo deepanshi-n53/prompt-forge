@@ -4,7 +4,7 @@ const answerValue = z.string().max(2000)
 
 // q1–q5: core wizard answers (billing, region, timeline, sensitive data, scale)
 // q6–q10: section-specific gap answers (deployment, multi-tenant, auth, db, mfa)
-// Additional keys are allowed for mid-generation pause answers
+// Additional keys are allowed for the field-keyed setup gap answers
 export const answersSchema = z.object({
   q1:  answerValue.optional(),  // billing model
   q2:  answerValue.optional(),  // launch region

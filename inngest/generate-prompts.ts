@@ -105,8 +105,8 @@ export const generatePromptsJob = inngest.createFunction(
   {
     id:       'generate-prompts',
     retries:  3,
-    // Headroom for a full (~55-section) FULL-track run plus a few mid-gen pauses.
-    // Per-section time is now bounded by the dependency-scoped prompt (above), so
+    // Headroom for a full (~55-section) FULL-track run. Per-section time is now
+    // bounded by the dependency-scoped prompt and per-call timeout (above), so
     // the run no longer creeps toward this ceiling the way the old growing-context
     // cascade did (which hit the previous 15m limit and got cancelled mid-run).
     timeouts: { finish: '30m' },
@@ -192,9 +192,9 @@ export const generatePromptsJob = inngest.createFunction(
 
     // The rich ArchitectureDecisions (already merged with the user's gap answers)
     // live inside parsedContent — NOT DecisionGraph, which holds the sections shape.
-    // This is the seed for the cascade. `let` so pause answers can re-merge into it.
+    // This is the seed for the cascade.
     const decisionsRaw = (parsedBRD as unknown as Record<string, unknown>).architectureDecisions
-    let decisions: ArchitectureDecisions = decisionsRaw
+    const decisions: ArchitectureDecisions = decisionsRaw
       ? normalizeDecisions(decisionsRaw as Record<string, unknown>)
       : emptyDecisions()
 
@@ -394,8 +394,8 @@ export const generatePromptsJob = inngest.createFunction(
           })
         }
 
-        // Progress — one memoized write per wave (never a raw setJobState, which
-        // would re-fire on replay and clobber a pause frame).
+        // Progress — one memoized write per wave (a memoized step so it isn't
+        // re-fired on replay).
         completedIdx += wave.length
         const donePercent = Math.round((completedIdx / totalSections) * 100)
         const doneCount   = completedIdx

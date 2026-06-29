@@ -51,9 +51,9 @@ export async function POST(_req: NextRequest, { params }: Context) {
   }
 
   // Reconstruct the same brd/answered payload the setup wizard produced, from the
-  // merged decisions already stored on the BRD. Any field still unknown is NOT
-  // silently defaulted — the cascade re-asks it via a mid-gen pause, exactly as a
-  // first run would (no artificial caps, no generic silent defaults).
+  // merged decisions already stored on the BRD. Gap questions are answered up front
+  // in the setup wizard, so a retry simply re-runs the cascade with the decisions
+  // already on the BRD.
   const parsedContent = (activeBrd.parsedContent ?? {}) as Record<string, unknown>
   const decisions = parsedContent.architectureDecisions
     ? normalizeDecisions(parsedContent.architectureDecisions as Record<string, unknown>)
