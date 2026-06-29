@@ -167,20 +167,29 @@ export async function generateSection(
 
   const systemPrompt = buildSystem(sectionNum, template.name, parsedBRD, lockedDecisions)
 
+  // The model returns the full filled template as `content`, so output size
+  // tracks template size. Budget tokens to THIS template's real need (~1 token /
+  // 4 chars, +25% headroom for blank-filling and the JSON wrapper) instead of a
+  // flat 16,384 — small sections (e.g. §03) stay tightly bounded while the huge
+  // ones (§24/§25) still get the full ceiling, so nothing is truncated.
+  const templateTokens = Math.ceil(template.template.length / 4)
+  const maxTokens = Math.min(16384, Math.max(4096, Math.ceil(templateTokens * 1.25) + 512))
+
+  // Abort a call that stalls rather than letting it block its whole wave. Sized
+  // to the worst-case legit generation for this budget (~45 tok/s + 45s base) so
+  // a real long section completes, but a hung socket can't run past it. One retry
+  // recovers a transient stall; a persistent one throws and Inngest retries the step.
+  const timeoutMs = Math.min(420_000, 45_000 + maxTokens * 22)
+
   const response = await callAI(
     [
       { role: 'system', content: systemPrompt },
       { role: 'user',   content: userMessage },
     ],
-    // The largest sections produce well over 5,000 tokens of structured output;
-    // a tight cap truncated them mid-document, breaking the JSON wrapper and
-    // dropping them to the 0.4 raw-text fallback. Use gpt-4o-mini's full 16,384
-    // output ceiling so no section is cut off — max_tokens is only a cap, so
-    // sections that finish early cost nothing extra.
-    16384,
+    maxTokens,
     // Section generation is the highest-volume call by far — run it on the
     // cheaper model. BRD parsing and change detection stay on the default.
-    { model: 'gpt-4o-mini' },
+    { model: 'gpt-4o-mini', timeoutMs, maxRetries: 1 },
   )
 
   return {

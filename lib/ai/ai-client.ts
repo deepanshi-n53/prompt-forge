@@ -36,6 +36,11 @@ interface AICallOptions {
   // high-volume calls (section generation) run on a smaller model while BRD
   // parsing / change detection stay on the default. Ignored by other providers.
   model?:       string
+  // Per-request OpenAI timeout (ms) and retry count. A hung socket aborts at the
+  // timeout and the SDK retries, so one stalled call can't block a whole
+  // generation wave until the SDK's 10-minute default. Ignored by other providers.
+  timeoutMs?:   number
+  maxRetries?:  number
 }
 
 export async function callAI(
@@ -107,15 +112,23 @@ export async function callAI(
   const openai = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY,
   })
-  const response = await openai.chat.completions.create({
-    model:      openaiModel,
-    max_tokens: maxTokens,
-    messages:   messages,
-    // Greedy, reproducible decoding when the caller asks for it (e.g. BRD
-    // extraction) — same input → same output, so health scores stay stable.
-    ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
-    ...(options.seed !== undefined ? { seed: options.seed } : {}),
-  })
+  const response = await openai.chat.completions.create(
+    {
+      model:      openaiModel,
+      max_tokens: maxTokens,
+      messages:   messages,
+      // Greedy, reproducible decoding when the caller asks for it (e.g. BRD
+      // extraction) — same input → same output, so health scores stay stable.
+      ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
+      ...(options.seed !== undefined ? { seed: options.seed } : {}),
+    },
+    // Per-request timeout + retry: a stalled call aborts and is retried instead
+    // of hanging the wave. Defaults leave the SDK's built-in behaviour untouched.
+    {
+      ...(options.timeoutMs !== undefined ? { timeout: options.timeoutMs } : {}),
+      ...(options.maxRetries !== undefined ? { maxRetries: options.maxRetries } : {}),
+    },
+  )
   return {
     text:  response.choices[0].message.content ?? '',
     ...(response.usage ? {
